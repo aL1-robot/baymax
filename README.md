@@ -7,6 +7,7 @@ A local voice assistant for ARM devices like the Orange Pi 5. It combines a wake
 - Wake-word detection with a local on-device model
 - Speech-to-text using Faster Whisper
 - Text-to-speech via Piper
+- Free YouTube audio playback using yt-dlp and mpv
 - Local-time answers, online dictionary definitions, and free web search
 - Local model storage under `~/models`
 - Works well on Ubuntu/Debian-based ARM systems
@@ -17,6 +18,7 @@ A local voice assistant for ARM devices like the Orange Pi 5. It combines a wake
 - `venv` support
 - `arecord` / ALSA for microphone input
 - `aplay` / ALSA for assistant voice playback
+- `mpv` for music playback (`sudo apt install mpv` on Ubuntu/Debian)
 - A compatible ARM64 or x86_64 Linux environment
 
 ## Installation
@@ -27,6 +29,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+Install the system audio player used for music:
+
+```bash
+sudo apt install mpv
 ```
 
 ## Download Piper
@@ -102,6 +110,13 @@ Press-to-talk mode without wake-word detection:
 ```bash
 python assistant.py --ptt
 ```
+
+Ask Baymax to play music or a named track, for example, “Play some music” or
+“Play Here Comes the Sun by the Beatles.” Baymax searches YouTube and plays the
+first audio result through `mpv`. Playback runs to completion before Baymax
+listens for another request. This uses free, unofficial YouTube search and
+playback, requires an internet connection, and may be affected by YouTube or
+yt-dlp changes.
 
 To use a different Piper executable or voice model:
 

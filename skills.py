@@ -45,6 +45,8 @@ Test without any voice:
 
 import random
 import re
+import shutil
+import subprocess
 import sys
 import time
 
@@ -131,6 +133,46 @@ def end_conversation():
     return "ending the conversation, going idle"
 
 
+def play_youtube_music(query):
+    """Search YouTube for one audio result and play it to completion with mpv."""
+    player = shutil.which("mpv")
+    if not player:
+        raise FileNotFoundError("mpv is not installed; install it with your system package manager")
+    try:
+        import yt_dlp
+    except ImportError as error:
+        raise RuntimeError("yt-dlp is not installed; install the project requirements") from error
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "extract_flat": True,
+        "skip_download": True,
+    }
+    with yt_dlp.YoutubeDL(options) as downloader:
+        result = downloader.extract_info(f"ytsearch1:{query}", download=False)
+    entries = result.get("entries") or []
+    if not entries:
+        raise LookupError(f"No YouTube result found for {query!r}")
+    entry = entries[0]
+    video_url = entry.get("webpage_url")
+    if not video_url and entry.get("id"):
+        video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+    if not video_url:
+        raise RuntimeError("YouTube search result did not contain a playable URL")
+
+    title = entry.get("title") or query
+    print(f"  Playing from YouTube: {title}", flush=True)
+    played = subprocess.run(
+        [player, "--no-video", "--ytdl-format=bestaudio", video_url],
+        check=False,
+    )
+    if played.returncode:
+        raise RuntimeError(f"mpv exited with status {played.returncode}")
+    return f"finished playing {title}"
+
+
 # ----------------------------------------------------------- strict matchers
 _VERB = re.compile(r"\b(turn|switch|put|shut|power|flip)\b")
 _DEVICE = re.compile(r"\b(lights?|lamps?|leds?|strip)\b")
@@ -173,6 +215,22 @@ def _convo_fast(text):
     return [("END_CONVERSATION", None)] if _END.search(t) else []
 
 
+def _music_fast(text):
+    """Return a YouTube search query for explicit play requests."""
+    if re.match(r"^\s*(what|why|how|who|when|where|which)\b", text, re.I):
+        return []
+    match = re.search(r"\b(?:play|put on)\s+(.+)$", text, re.I)
+    if not match:
+        return []
+    query = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?'\"")
+    query = re.sub(r"^(?:me\s+)?(?:some\s+)?", "", query, flags=re.I).strip()
+    if query.lower().startswith("the song "):
+        query = query[9:].strip()
+    if not query or query.lower() in {"music", "some music", "something"}:
+        query = "popular music"
+    return [("MUSIC_PLAY", query[:160])]
+
+
 # ------------------------------------------------------------- the index
 # Small models follow examples far better than rules. In each example list, a
 # reply WITH a tag is a positive example; a reply without one is a negative
@@ -204,6 +262,14 @@ CONVO_EXAMPLES = [
      "I am functioning well. How are you feeling?"),
 ]
 
+MUSIC_EXAMPLES = [
+    ("Play some music.",
+     "I played some music for you. [[MUSIC_PLAY:popular music]]"),
+    ("Play Here Comes the Sun by the Beatles.",
+     "I played Here Comes the Sun by the Beatles. "
+     "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
+]
+
 # "about"   : read by the router (what requests belong to this group)
 # "ability" : short phrase Baymax can say out loud when he lists what he can do
 #             (leave it out for groups that shouldn't be mentioned)
@@ -221,6 +287,12 @@ GROUPS = {
         "examples": CONVO_EXAMPLES,
         "fast": _convo_fast,
     },
+    "MUSIC": {
+        "about": "play a requested song or music from YouTube",
+        "ability": "play music from YouTube",
+        "examples": MUSIC_EXAMPLES,
+        "fast": _music_fast,
+    },
 }
 
 # Router answers that are not skill groups.
@@ -237,6 +309,8 @@ SKILLS = {
     "END_CONVERSATION": ("CONVERSATION",
                          "end the conversation; you will go idle until the "
                          "next wake word",                        end_conversation, None),
+    "MUSIC_PLAY": ("MUSIC", "search for and play a song or music on YouTube",
+                   play_youtube_music, "QUERY"),
 }
 
 ROUTER_EXAMPLES_PER_GROUP = 3
@@ -256,6 +330,7 @@ FAST_REPLIES = {
     "END_CONVERSATION": ["Okay. I will be here if you need me.",
                          "Goodbye. I am glad I could help.",
                          "Going quiet now. Say my name when you need me."],
+    "MUSIC_PLAY": ["I played {arg} for you."],
 }
 
 # Baymax-style lines for when speech wasn't understood (no LLM call needed).
@@ -287,7 +362,7 @@ def router_prompt():
     for name, g in GROUPS.items():
         lines.append(f"{name} - {g['about']}")
     lines.append("UNSUPPORTED - asks you to DO something that is not in the "
-                 "list above (play music, set a timer, send a message, open a "
+                 "list above (set a timer, send a message, open a "
                  "door). Questions and advice are NONE, not UNSUPPORTED")
     lines.append("UNCLEAR - garbled, cut off, or not a real sentence")
     lines.append("Examples:")
@@ -389,7 +464,7 @@ def fallback(user_text):
 
 
 # ------------------------------------------------------- parsing & running
-TAG = re.compile(r"\[{1,2}\s*([A-Z_]+)\s*(?::\s*([^\]\s]*))?\s*\]{1,2}")
+TAG = re.compile(r"\[{1,2}\s*([A-Z_]+)\s*(?::\s*([^\]]+?))?\s*\]{1,2}")
 
 
 def extract(reply):
@@ -397,7 +472,7 @@ def extract(reply):
     calls = {}
     for tag, arg in TAG.findall(reply):
         if tag in SKILLS:
-            calls[tag] = arg or None
+            calls[tag] = arg.strip() or None
     clean = TAG.sub("", reply).strip()
     return clean, list(calls.items())
 
@@ -409,6 +484,8 @@ def run(tag, arg=None):
         if arg_hint:
             if arg is None:
                 raise ValueError(f"{tag} needs a {arg_hint.lower()} value")
+            if arg_hint == "QUERY":
+                return True, fn(arg.strip())
             return True, fn(int(float(arg)))
         return True, fn()
     except Exception as e:

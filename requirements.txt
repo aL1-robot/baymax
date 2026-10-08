@@ -10,6 +10,7 @@ pymicro-features==2.0.2
 faster-whisper
 
 piper-tts
+yt-dlp
 
 #
 spidev
