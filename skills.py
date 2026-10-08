@@ -126,6 +126,7 @@ led = LedStrip()
 
 # Flags that skills can raise for assistant.py to act on.
 state = {"end_conversation": False}
+music_state = {"process": None, "title": None}
 
 
 def end_conversation():
@@ -133,8 +134,43 @@ def end_conversation():
     return "ending the conversation, going idle"
 
 
+def youtube_music_status():
+    """Return (is_playing, error_message) and reap a completed player process."""
+    process = music_state["process"]
+    if process is None:
+        return False, None
+    result = process.poll()
+    if result is None:
+        return True, None
+    title = music_state["title"] or "the track"
+    music_state.update(process=None, title=None)
+    if result:
+        return False, f"mpv exited with status {result} while playing {title}"
+    return False, None
+
+
+def stop_youtube_music():
+    """Stop the current YouTube music player, if one is active."""
+    active, _ = youtube_music_status()
+    if not active:
+        return "no music was playing"
+    process = music_state["process"]
+    title = music_state["title"] or "the music"
+    process.terminate()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    music_state.update(process=None, title=None)
+    return title
+
+
 def play_youtube_music(query):
-    """Search YouTube for one audio result and play it to completion with mpv."""
+    """Search YouTube and start one audio result with mpv in the background."""
+    active, _ = youtube_music_status()
+    if active:
+        raise RuntimeError("music is already playing; say stop music first")
     player = shutil.which("mpv")
     if not player:
         raise FileNotFoundError("mpv is not installed; install it with your system package manager")
@@ -208,14 +244,12 @@ def play_youtube_music(query):
 
     title = entry.get("title") or query
     print(f"  Playing from YouTube: {title}", flush=True)
-    played = subprocess.run(
+    process = subprocess.Popen(
         [player, "--no-video", "--no-terminal", "--really-quiet", audio_url],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        check=False,
     )
-    if played.returncode:
-        raise RuntimeError(f"mpv exited with status {played.returncode}")
+    music_state.update(process=process, title=title)
     return title
 
 
@@ -263,6 +297,11 @@ def _convo_fast(text):
 
 def _music_fast(text):
     """Return a YouTube search query for explicit play requests."""
+    if (re.search(r"\b(?:stop(?:\s+playing)?|turn off|end|cancel)\s+"
+                  r"(?:(?:the|this)\s+)?"
+                  r"(?:music|song|track|it)\b", text, re.I)
+            or re.match(r"^\s*(?:stop|stop playing)[.!?]*\s*$", text, re.I)):
+        return [("MUSIC_STOP", None)]
     if re.match(r"^\s*(what|why|how|who|when|where|which)\b", text, re.I):
         return []
     match = re.search(r"\b(?:play|put on)\s+(.+)$", text, re.I)
@@ -314,6 +353,8 @@ MUSIC_EXAMPLES = [
     ("Play Here Comes the Sun by the Beatles.",
      "I played Here Comes the Sun by the Beatles. "
      "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
+    ("Stop the music.",
+     "I stopped the music. [[MUSIC_STOP]]"),
 ]
 
 # "about"   : read by the router (what requests belong to this group)
@@ -334,7 +375,7 @@ GROUPS = {
         "fast": _convo_fast,
     },
     "MUSIC": {
-        "about": "play a requested song or music from YouTube",
+        "about": "play music from YouTube or stop the currently playing music",
         "ability": "play music from YouTube",
         "examples": MUSIC_EXAMPLES,
         "fast": _music_fast,
@@ -357,6 +398,8 @@ SKILLS = {
                          "next wake word",                        end_conversation, None),
     "MUSIC_PLAY": ("MUSIC", "search for and play a song or music on YouTube",
                    play_youtube_music, "QUERY"),
+    "MUSIC_STOP": ("MUSIC", "stop the currently playing music",
+                   stop_youtube_music, None),
 }
 
 ROUTER_EXAMPLES_PER_GROUP = 3
@@ -377,6 +420,7 @@ FAST_REPLIES = {
                          "Goodbye. I am glad I could help.",
                          "Going quiet now. Say my name when you need me."],
     "MUSIC_PLAY": ["I played {arg} for you."],
+    "MUSIC_STOP": ["I stopped the music."],
 }
 
 # Baymax-style lines for when speech wasn't understood (no LLM call needed).

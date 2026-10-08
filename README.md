@@ -114,10 +114,15 @@ python assistant.py --ptt
 Ask Baymax to play music or a named track, for example, “Play some music” or
 “Play Here Comes the Sun by the Beatles.” Baymax searches YouTube and plays the
 first audio result through `mpv`. `yt-dlp` resolves the audio stream URL, so
-`mpv` does not need its own YouTube download helper. Playback runs to completion
-before Baymax listens for another request. This uses free, unofficial YouTube
-search and playback, requires an internet connection, and may be affected by
-YouTube or yt-dlp changes.
+`mpv` does not need its own YouTube download helper. Playback runs in the
+background while Baymax listens for “stop music”; unrelated speech and song
+lyrics are ignored during playback. Baymax announces if the player exits with
+an error. During playback, short audio chunks let Baymax check for a stop
+command regularly. Because the microphone can also hear the music, recognition
+may be less reliable at high playback volumes; this setup does not use acoustic
+echo cancellation. This uses free, unofficial YouTube search and playback,
+requires an internet connection, and may be affected by YouTube or yt-dlp
+changes.
 
 If YouTube extraction stops working, update yt-dlp using the same Python
 environment that runs Baymax:
