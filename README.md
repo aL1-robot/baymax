@@ -119,6 +119,8 @@ before starting the YouTube search. `yt-dlp` resolves the audio stream URL, so
 background while Baymax listens for “stop music”; it lowers music to 15% while
 listening and mutes it while speaking. Unrelated speech and song lyrics are
 ignored during playback. Baymax announces if the player exits with an error.
+After mpv starts, the track title is shown in the console rather than spoken
+over music, avoiding an ALSA device-busy conflict with `aplay`.
 This reduces music masking, but is not acoustic echo cancellation: unlike
 Alexa, this setup does not have a microphone array or an echo-cancellation
 system. Recognition can still be affected by speaker volume, distance, and room

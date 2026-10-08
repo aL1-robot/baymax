@@ -1181,7 +1181,11 @@ def converse(args, mic, thr, stt, history, turn):
                 reply = ask_llm(history, text, args, group)
 
         print(f"\n  Baymax: {reply}\n", flush=True)
-        speak(reply, args)
+        player = skills.music_state["process"]
+        if player is not None and player.poll() is None:
+            log("TTS", "skipping playback confirmation; the pre-play announcement was spoken")
+        else:
+            speak(reply, args)
         vlog("TURN", f"total {time.monotonic() - t0:.1f}s (route + reply)")
 
         if skills.state["end_conversation"]:
