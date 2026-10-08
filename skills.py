@@ -143,37 +143,50 @@ def play_youtube_music(query):
     except ImportError as error:
         raise RuntimeError("yt-dlp is not installed; install the project requirements") from error
 
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "ignoreerrors": True,
-        "format": "bestaudio/best",
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["web_safari", "web_embedded", "-tv_downgraded"],
-            },
-        },
-    }
-    try:
-        with yt_dlp.YoutubeDL(options) as downloader:
-            result = downloader.extract_info(f"ytsearch5:{query}", download=False)
-    except yt_dlp.utils.DownloadError as error:
-        raise RuntimeError(
-            "yt-dlp could not extract YouTube audio. Upgrade yt-dlp in the "
-            "assistant's Python environment and try again."
-        ) from error
-
-    entries = result.get("entries") if result else None
-    playable = next(
-        (entry for entry in entries or [] if entry and entry.get("url")),
-        None,
+    version = getattr(getattr(yt_dlp, "version", None), "__version__", "unknown")
+    player_clients = (
+        ["web_safari", "web_embedded", "-tv_downgraded"],
+        ["default", "web_embedded", "-tv_downgraded"],
     )
-    if not playable:
-        raise LookupError(
-            "No playable YouTube result was found. YouTube may have blocked "
-            "the extractor; update yt-dlp and try again."
+    playable = None
+    last_error = None
+    for clients in player_clients:
+        print(f"  YouTube extractor: yt-dlp {version}, clients={','.join(clients)}",
+              flush=True)
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "ignoreerrors": True,
+            "format": "bestaudio/best",
+            "extractor_args": {"youtube": {"player_client": clients}},
+        }
+        try:
+            with yt_dlp.YoutubeDL(options) as downloader:
+                result = downloader.extract_info(
+                    f"ytsearch5:{query}", download=False
+                )
+        except yt_dlp.utils.DownloadError as error:
+            last_error = error
+            continue
+
+        entries = result.get("entries") if result else None
+        playable = next(
+            (entry for entry in entries or [] if entry and entry.get("url")),
+            None,
         )
+        if playable:
+            break
+
+    if not playable:
+        error = RuntimeError(
+            f"No playable YouTube result with yt-dlp {version}. Update yt-dlp "
+            "in the assistant's Python environment with: "
+            "python -m pip install --upgrade yt-dlp"
+        )
+        if last_error:
+            raise error from last_error
+        raise error
     entry = playable
     audio_url = entry["url"]
 

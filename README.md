@@ -126,8 +126,10 @@ environment that runs Baymax:
 python -m pip install --upgrade yt-dlp
 ```
 
-Baymax configures yt-dlp to use YouTube's `web_safari` and `web_embedded`
-player clients instead of the currently problematic `tv_downgraded` client.
+Baymax first tries YouTube's `web_safari` and `web_embedded` player clients,
+then retries with `default` and `web_embedded`; both exclude the currently
+problematic `tv_downgraded` client. It logs the installed yt-dlp version and
+the client strategy used.
 The Python 3.9 deprecation warning means yt-dlp support for that Python version
 is ending. Prefer Python 3.10 or newer for the assistant environment.
 
