@@ -147,17 +147,30 @@ def play_youtube_music(query):
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "ignoreerrors": True,
         "format": "bestaudio/best",
     }
-    with yt_dlp.YoutubeDL(options) as downloader:
-        result = downloader.extract_info(f"ytsearch1:{query}", download=False)
-    entries = result.get("entries") or []
-    if not entries:
-        raise LookupError(f"No YouTube result found for {query!r}")
-    entry = entries[0]
-    audio_url = entry.get("url")
-    if not audio_url:
-        raise RuntimeError("yt-dlp did not resolve a direct audio stream URL")
+    try:
+        with yt_dlp.YoutubeDL(options) as downloader:
+            result = downloader.extract_info(f"ytsearch5:{query}", download=False)
+    except yt_dlp.utils.DownloadError as error:
+        raise RuntimeError(
+            "yt-dlp could not extract YouTube audio. Upgrade yt-dlp in the "
+            "assistant's Python environment and try again."
+        ) from error
+
+    entries = result.get("entries") if result else None
+    playable = next(
+        (entry for entry in entries or [] if entry and entry.get("url")),
+        None,
+    )
+    if not playable:
+        raise LookupError(
+            "No playable YouTube result was found. YouTube may have blocked "
+            "the extractor; update yt-dlp and try again."
+        )
+    entry = playable
+    audio_url = entry["url"]
 
     title = entry.get("title") or query
     print(f"  Playing from YouTube: {title}", flush=True)

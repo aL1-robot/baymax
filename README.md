@@ -119,6 +119,16 @@ before Baymax listens for another request. This uses free, unofficial YouTube
 search and playback, requires an internet connection, and may be affected by
 YouTube or yt-dlp changes.
 
+If YouTube extraction stops working, update yt-dlp using the same Python
+environment that runs Baymax:
+
+```bash
+python -m pip install --upgrade yt-dlp
+```
+
+The Python 3.9 deprecation warning means yt-dlp support for that Python version
+is ending. Prefer Python 3.10 or newer for the assistant environment.
+
 To use a different Piper executable or voice model:
 
 ```bash

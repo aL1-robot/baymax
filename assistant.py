@@ -920,6 +920,14 @@ def run_tags(tags):
     return results
 
 
+def music_failure_reply(error):
+    """Give a useful spoken hint for the common YouTube extractor failure."""
+    message = error.lower()
+    if "yt-dlp" in message or "youtube extractor" in message:
+        return "I couldn't get audio from YouTube. Please update yt-dlp and try again."
+    return "I couldn't play music just now. Please check the internet connection and music player."
+
+
 def ask_llm(history, user_text, args, group, web_results=None):
     """Stage 2: the reply, with only the chosen group's skills in the prompt."""
     system = PERSONA
@@ -990,7 +998,7 @@ def ask_llm(history, user_text, args, group, web_results=None):
     if music_result:
         _, ok, result = music_result
         reply = (f"I finished playing {result}." if ok else
-                 "I couldn't play music just now. Please check the internet connection and music player.")
+                 music_failure_reply(result))
 
     if not reply:
         reply = "Okay." if tags else "(empty reply)"
@@ -1066,7 +1074,7 @@ def converse(args, mic, thr, stt, history, turn):
             if music_result:
                 _, ok, result = music_result
                 reply = (f"I finished playing {result}." if ok else
-                         "I couldn't play music just now. Please check the internet connection and music player.")
+                         music_failure_reply(result))
             history.append({"role": "user", "content": text + " /no_think"})
             history.append({"role": "assistant", "content": reply})
             del history[:-12]
