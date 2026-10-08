@@ -232,6 +232,9 @@ def initialize_voice_cache(args):
                     prefix=".building-", dir=str(cache_dir)) as tmp:
                 generated_path = Path(tmp) / "reply.wav"
                 with wave.open(str(generated_path), "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(voice.config.sample_rate)
                     voice.synthesize(phrase, wav_file)
                 if not generated_path.is_file() or generated_path.stat().st_size == 0:
                     raise RuntimeError(f"Piper produced no audio for cached reply: {phrase}")
