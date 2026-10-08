@@ -345,7 +345,7 @@ def initialize_voice_cache(args):
     log("INIT", f"{len(phrases)} prebuilt replies ready in {cache_dir}")
 
 
-def speak(text, args):
+def _speak_audio(text, args):
     """Play a cached skill reply or synthesize a temporary WAV for other text."""
     text = clean_for_speech(text)
     if not text:
@@ -405,6 +405,20 @@ def speak(text, args):
     finally:
         if temporary:
             temporary.cleanup()
+
+
+def speak(text, args):
+    """Speak over music, then leave it ducked for the next listening window."""
+    process = skills.music_state["process"]
+    music_active = process is not None and process.poll() is None
+    try:
+        if music_active:
+            skills.set_youtube_music_volume(0)
+        _speak_audio(text, args)
+    finally:
+        process = skills.music_state["process"]
+        if process is not None and process.poll() is None:
+            skills.set_youtube_music_volume(skills.MUSIC_LISTEN_VOLUME)
 
 
 # ---------------------------------------------------------------------- mic
@@ -909,11 +923,14 @@ def route(user_text, args):
     return group
 
 
-def run_tags(tags):
+def run_tags(tags, args):
     """Run skill tags [(tag, arg), ...] and log what happened."""
     results = []
     for tag, arg in tags:
         name = f"{tag}:{arg}" if arg else tag
+        if tag == "MUSIC_PLAY":
+            request = arg or "some music"
+            speak(f"I'll look for {request} and start playing it now.", args)
         ok, msg = skills.run(tag, arg)
         log("SKILL", f"{name} -> {msg}" if ok else f"{name} FAILED - {msg}")
         results.append((tag, ok, msg))
@@ -1025,7 +1042,7 @@ def ask_llm(history, user_text, args, group, web_results=None):
             and not any(t == "END_CONVERSATION" for t, _ in tags)):
         log("SKILL", "said goodbye without the tag, ending the conversation anyway")
         tags = list(tags) + [("END_CONVERSATION", None)]
-    action_results = run_tags(tags)
+    action_results = run_tags(tags, args)
     action_reply = skill_failure_reply(action_results) or play_started_reply(action_results)
     if action_reply:
         reply = action_reply
@@ -1049,9 +1066,19 @@ def converse(args, mic, thr, stt, history, turn):
             announce_music_failure(args, music_error)
             return "music playback failed"
 
-        pcm = record_utterance(
-            mic, thr, max_wait=wait, max_len=2.5 if music_active else 15.0
-        )
+        if music_active:
+            skills.set_youtube_music_volume(skills.MUSIC_LISTEN_VOLUME)
+        try:
+            pcm = record_utterance(
+                mic, thr, max_wait=wait, max_len=2.5 if music_active else 15.0
+            )
+            if pcm is not None and args.save_wavs:
+                log("REC", f"saved to {save_wav(pcm, turn)}")
+            if pcm is not None:
+                text, conf = transcribe(stt, pcm)
+        finally:
+            if music_active:
+                skills.set_youtube_music_volume(100)
         if pcm is None:
             music_active, music_error = skills.youtube_music_status()
             if music_error:
@@ -1061,10 +1088,6 @@ def converse(args, mic, thr, stt, history, turn):
                 wait = 0.8
                 continue
             return "no speech"
-        if args.save_wavs:
-            log("REC", f"saved to {save_wav(pcm, turn)}")
-
-        text, conf = transcribe(stt, pcm)
         music_active, music_error = skills.youtube_music_status()
         if music_error:
             announce_music_failure(args, music_error)
@@ -1127,7 +1150,7 @@ def converse(args, mic, thr, stt, history, turn):
             misses = 0
             tags, reply = fast
             log("SKILL", "obvious command, LLM skipped")
-            action_results = run_tags(tags)  # act first, then speak
+            action_results = run_tags(tags, args)
             action_reply = (
                 skill_failure_reply(action_results)
                 or play_started_reply(action_results)

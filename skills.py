@@ -43,12 +43,16 @@ Test without any voice:
     python skills.py fast "turn the lamp on"        (try the fast path)
 """
 
+import json
 import random
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 
 # --------------------------------------------------------------- LED strip
@@ -126,7 +130,23 @@ led = LedStrip()
 
 # Flags that skills can raise for assistant.py to act on.
 state = {"end_conversation": False}
-music_state = {"process": None, "title": None}
+MUSIC_LISTEN_VOLUME = 15
+music_state = {
+    "process": None,
+    "title": None,
+    "ipc_path": None,
+    "temp_dir": None,
+    "volume": 100,
+}
+
+
+def _clear_music_state():
+    temp_dir = music_state["temp_dir"]
+    music_state.update(
+        process=None, title=None, ipc_path=None, temp_dir=None, volume=100
+    )
+    if temp_dir:
+        temp_dir.cleanup()
 
 
 def end_conversation():
@@ -143,7 +163,7 @@ def youtube_music_status():
     if result is None:
         return True, None
     title = music_state["title"] or "the track"
-    music_state.update(process=None, title=None)
+    _clear_music_state()
     if result:
         return False, f"mpv exited with status {result} while playing {title}"
     return False, None
@@ -162,8 +182,39 @@ def stop_youtube_music():
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait()
-    music_state.update(process=None, title=None)
+    _clear_music_state()
     return title
+
+
+def set_youtube_music_volume(volume):
+    """Set mpv's volume through its private local IPC socket."""
+    if not 0 <= volume <= 100:
+        raise ValueError("music volume must be between 0 and 100")
+    process = music_state["process"]
+    if process is None or process.poll() is not None:
+        return False
+    if music_state["volume"] == volume:
+        return True
+    ipc_path = music_state["ipc_path"]
+    if not ipc_path:
+        raise RuntimeError("mpv control socket is unavailable")
+
+    request = json.dumps({
+        "command": ["set_property", "volume", volume],
+    }).encode("utf-8") + b"\n"
+    last_error = None
+    for _ in range(10):
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(0.2)
+                connection.connect(ipc_path)
+                connection.sendall(request)
+            music_state["volume"] = volume
+            return True
+        except OSError as error:
+            last_error = error
+            time.sleep(0.05)
+    raise RuntimeError(f"could not set mpv volume: {last_error}") from last_error
 
 
 def play_youtube_music(query):
@@ -244,12 +295,24 @@ def play_youtube_music(query):
 
     title = entry.get("title") or query
     print(f"  Playing from YouTube: {title}", flush=True)
-    process = subprocess.Popen(
-        [player, "--no-video", "--no-terminal", "--really-quiet", audio_url],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    temp_dir = tempfile.TemporaryDirectory(prefix="baymax-mpv-")
+    ipc_path = str(Path(temp_dir.name) / "mpv.sock")
+    try:
+        process = subprocess.Popen(
+            [
+                player, "--no-video", "--no-terminal", "--really-quiet",
+                "--input-ipc-server=" + ipc_path, audio_url,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        temp_dir.cleanup()
+        raise
+    music_state.update(
+        process=process, title=title, ipc_path=ipc_path,
+        temp_dir=temp_dir, volume=100,
     )
-    music_state.update(process=process, title=title)
     return title
 
 
