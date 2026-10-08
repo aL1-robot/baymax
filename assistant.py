@@ -36,6 +36,7 @@ import argparse
 import contextlib
 import datetime
 import hashlib
+import inspect
 import io
 import json
 import queue
@@ -48,6 +49,7 @@ import tempfile
 import threading
 import time
 import traceback
+import unicodedata
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -114,6 +116,8 @@ IDLE_DEAF_CHUNKS = 150  # after a conversation ends, ignore ~1.5 s of audio (10 
 VERBOSE = False
 VOICE_CACHE = {}
 WAKE_REPLIES = ["Yes?", "I'm here.", "Go ahead.", "I'm listening.", "How can I help?", "Yes, what is it?"]
+TTS_LEADING_SILENCE_SECONDS = 0.3
+TTS_CACHE_VERSION = 2
 
 
 # ------------------------------------------------------------------ logging
@@ -210,6 +214,76 @@ def _has_audio_frames(path):
         return False
 
 
+def clean_for_speech(text):
+    """Remove Markdown emphasis and emoji that Piper would read aloud literally."""
+    text = text.replace("*", "")
+    clean = []
+    for char in text:
+        codepoint = ord(char)
+        is_emoji = (
+            unicodedata.category(char) == "So"
+            or 0x1F000 <= codepoint <= 0x1FAFF
+            or 0x2600 <= codepoint <= 0x27BF
+            or 0x1F1E6 <= codepoint <= 0x1F1FF
+            or codepoint in (0x200D, 0xFE0E, 0xFE0F, 0x20E3)
+            or 0x1F3FB <= codepoint <= 0x1F3FF
+        )
+        if not is_emoji:
+            clean.append(char)
+    return " ".join("".join(clean).split())
+
+
+def _add_leading_silence(path):
+    """Prepend silence so ALSA/speakers can wake before speech begins."""
+    with wave.open(str(path), "rb") as source:
+        params = source.getparams()
+        frames = source.readframes(source.getnframes())
+    silence_frames = int(params.framerate * TTS_LEADING_SILENCE_SECONDS)
+    silence = bytes(silence_frames * params.nchannels * params.sampwidth)
+    with tempfile.TemporaryDirectory(prefix=".padding-", dir=str(path.parent)) as tmp:
+        padded_path = Path(tmp) / path.name
+        with wave.open(str(padded_path), "wb") as target:
+            target.setparams(params)
+            target.writeframes(silence + frames)
+        padded_path.replace(path)
+
+
+def _synthesize_cached(voice, text, wav_file, args):
+    """Pass pacing settings across old and new Piper Python APIs."""
+    synthesize_wav = getattr(voice, "synthesize_wav", None)
+    if callable(synthesize_wav):
+        parameters = inspect.signature(synthesize_wav).parameters
+        if "syn_config" in parameters:
+            from piper import SynthesisConfig
+
+            synthesize_wav(
+                text,
+                wav_file,
+                syn_config=SynthesisConfig(
+                    length_scale=args.length_scale,
+                    sentence_silence=args.sentence_silence,
+                ),
+            )
+            return
+    synthesize = getattr(voice, "synthesize", None)
+    if callable(synthesize):
+        parameters = inspect.signature(synthesize).parameters
+        kwargs = {}
+        if "length_scale" in parameters:
+            kwargs["length_scale"] = args.length_scale
+        if "sentence_silence" in parameters:
+            kwargs["sentence_silence"] = args.sentence_silence
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(voice.config.sample_rate)
+        result = synthesize(text, wav_file, **kwargs)
+        if result is not None and hasattr(result, "__iter__"):
+            for _ in result:
+                pass
+        return
+    raise RuntimeError("Installed Piper Python API has no supported WAV synthesis method")
+
+
 def initialize_voice_cache(args):
     """Build persistent WAVs for fixed replies that are not cached yet."""
     model, _, _ = _audio_tools(args)
@@ -217,13 +291,17 @@ def initialize_voice_cache(args):
     cache_dir.mkdir(parents=True, exist_ok=True)
     model_stat = model.stat()
     model_key = hashlib.sha256(
-        f"{model.resolve()}:{model_stat.st_size}:{model_stat.st_mtime_ns}".encode()
+        (
+            f"{model.resolve()}:{model_stat.st_size}:{model_stat.st_mtime_ns}:"
+            f"{args.length_scale}:{args.sentence_silence}:"
+            f"{TTS_LEADING_SILENCE_SECONDS}:{TTS_CACHE_VERSION}"
+        ).encode()
     ).hexdigest()[:12]
     phrases = sorted({
-        reply
+        clean_for_speech(reply)
         for replies in [*skills.FAST_REPLIES.values(), WAKE_REPLIES]
         for reply in replies
-        if "{" not in reply
+        if "{" not in reply and clean_for_speech(reply)
     })
     cache_paths = {
         phrase: cache_dir / (
@@ -249,16 +327,10 @@ def initialize_voice_cache(args):
                     prefix=".building-", dir=str(cache_dir)) as tmp:
                 generated_path = Path(tmp) / "reply.wav"
                 with wave.open(str(generated_path), "wb") as wav_file:
-                    synthesize_wav = getattr(voice, "synthesize_wav", None)
-                    if callable(synthesize_wav):
-                        synthesize_wav(phrase, wav_file)
-                    else:
-                        wav_file.setnchannels(1)
-                        wav_file.setsampwidth(2)
-                        wav_file.setframerate(voice.config.sample_rate)
-                        voice.synthesize(phrase, wav_file)
+                    _synthesize_cached(voice, phrase, wav_file, args)
                 if not _has_audio_frames(generated_path):
                     raise RuntimeError(f"Piper produced no audio for cached reply: {phrase}")
+                _add_leading_silence(generated_path)
                 generated_path.replace(path)
 
     VOICE_CACHE.clear()
@@ -268,6 +340,10 @@ def initialize_voice_cache(args):
 
 def speak(text, args):
     """Play a cached skill reply or synthesize a temporary WAV for other text."""
+    text = clean_for_speech(text)
+    if not text:
+        log("TTS", "reply has no speakable text; skipping playback")
+        return
     model, piper, player = _audio_tools(args)
     cached_path = VOICE_CACHE.get(text)
     temporary = None
@@ -280,7 +356,11 @@ def speak(text, args):
         log("TTS", "generating speech...")
         try:
             generated = subprocess.run(
-                [piper, "--model", str(model), "--output_file", str(audio_path)],
+                [
+                    piper, "--model", str(model), "--output_file", str(audio_path),
+                    "--length_scale", str(args.length_scale),
+                    "--sentence_silence", str(args.sentence_silence),
+                ],
                 input=(text + "\n").encode("utf-8"),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -294,6 +374,9 @@ def speak(text, args):
                 )
             if not audio_path.is_file() or audio_path.stat().st_size == 0:
                 raise RuntimeError(f"Piper did not create audio: {audio_path}")
+            if not _has_audio_frames(audio_path):
+                raise RuntimeError(f"Piper created invalid audio: {audio_path}")
+            _add_leading_silence(audio_path)
         except Exception:
             temporary.cleanup()
             raise
@@ -1022,6 +1105,10 @@ def main():
                    help="Piper executable (default: ./piper/piper or PATH)")
     p.add_argument("--voice-model", default=str(SCRIPT_DIR / "baymax.onnx"),
                    help="Piper voice model (default: ./baymax.onnx)")
+    p.add_argument("--length-scale", type=float, default=1.15,
+                   help="Piper speech pace; higher values speak more slowly (default: 1.15)")
+    p.add_argument("--sentence-silence", type=float, default=0.2,
+                   help="silence between Piper sentences, in seconds (default: 0.2)")
     p.add_argument("--player", default="aplay",
                    help="WAV audio player (default: aplay)")
     p.add_argument("--voice-cache", default=str(SCRIPT_DIR / "voice_cache"),

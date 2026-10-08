@@ -111,6 +111,12 @@ python assistant.py --piper /path/to/piper \
 ```
 
 Set a different cache location with `--voice-cache /path/to/cache`.
+Piper's `--length-scale` and `--sentence-silence` options adjust pace and
+pauses; the defaults are slightly slower and more measured. This changes
+cadence, not the identity of the voice model. Generated WAVs include a short
+silent lead-in to help prevent the first word being clipped while audio
+hardware wakes up. Before speech synthesis, emoji and Markdown asterisks are
+removed so they are not spoken aloud.
 
 ## TTS example with a custom model
 
