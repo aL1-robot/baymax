@@ -15,6 +15,7 @@ A local voice assistant for ARM devices like the Orange Pi 5. It combines a wake
 - Python 3.10+
 - `venv` support
 - `arecord` / ALSA for microphone input
+- `aplay` / ALSA for assistant voice playback
 - A compatible ARM64 or x86_64 Linux environment
 
 ## Installation
@@ -41,7 +42,9 @@ This gives you the `piper` binary in the extracted folder.
 
 ## Model files
 
-Place model files in `~/models` so the scripts can find them automatically.
+Place the wake-word and Whisper files in `~/models` so the scripts can find
+them automatically. By default, Piper uses the bundled `piper/piper`
+executable and the `baymax.onnx` voice model beside `assistant.py`.
 
 Typical files include:
 
@@ -57,7 +60,8 @@ mkdir -p ~/models
 
 ## Running the assistant
 
-Start the wake-word voice assistant:
+Start the wake-word voice assistant. Replies are generated with Piper and
+played through the default ALSA output:
 
 ```bash
 python assistant.py
@@ -73,6 +77,13 @@ Press-to-talk mode without wake-word detection:
 
 ```bash
 python assistant.py --ptt
+```
+
+To use a different Piper executable or voice model:
+
+```bash
+python assistant.py --piper /path/to/piper \
+  --voice-model /path/to/my_voice.onnx
 ```
 
 ## TTS example with a custom model

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-"Hey Baymax" voice assistant, text output for now.
+"Hey Baymax" voice assistant.
 
 Flow:
     wake word -> CONVERSATION (keeps listening for follow-ups, no wake word
@@ -38,8 +38,10 @@ import io
 import json
 import queue
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -159,6 +161,67 @@ def save_wav(pcm, turn):
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(pcm)
     return path
+
+
+# ----------------------------------------------------------------------- TTS
+def speak(text, args):
+    """Generate a reply with Piper and play it through ALSA."""
+    model = Path(args.voice_model).expanduser()
+    if not model.is_file():
+        raise FileNotFoundError(f"Piper voice model not found: {model}")
+
+    if args.piper:
+        piper = shutil.which(args.piper)
+    else:
+        bundled = SCRIPT_DIR / "piper" / "piper"
+        if bundled.is_file() and bundled.stat().st_mode & 0o111:
+            piper = str(bundled)
+        else:
+            piper = shutil.which("piper")
+    if not piper:
+        raise FileNotFoundError(
+            f"Piper executable not found: {args.piper or 'piper'} "
+            "(install it or pass --piper)"
+        )
+
+    player = shutil.which(args.player)
+    if not player:
+        raise FileNotFoundError(
+            f"Audio player not found: {args.player} (install it or pass --player)"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="baymax-tts-") as tmp:
+        audio_path = Path(tmp) / "reply.wav"
+        log("TTS", "generating speech...")
+        generated = subprocess.run(
+            [piper, "--model", str(model), "--output_file", str(audio_path)],
+            input=(text + "\n").encode("utf-8"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if generated.returncode:
+            error = generated.stderr.decode(errors="replace").strip()
+            raise RuntimeError(
+                f"Piper failed with exit code {generated.returncode}"
+                + (f": {error}" if error else "")
+            )
+        if not audio_path.is_file() or audio_path.stat().st_size == 0:
+            raise RuntimeError(f"Piper did not create audio: {audio_path}")
+
+        log("TTS", "playing reply")
+        played = subprocess.run(
+            [player, "-q", str(audio_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if played.returncode:
+            error = played.stderr.decode(errors="replace").strip()
+            raise RuntimeError(
+                f"Audio player failed with exit code {played.returncode}"
+                + (f": {error}" if error else "")
+            )
 
 
 # ---------------------------------------------------------------------- mic
@@ -600,6 +663,7 @@ def converse(args, mic, thr, stt, history, turn):
             reply = ask_llm(history, text, args, group)
 
         print(f"\n  Baymax: {reply}\n", flush=True)
+        speak(reply, args)
         vlog("TURN", f"total {time.monotonic() - t0:.1f}s (route + reply)")
 
         if skills.state["end_conversation"]:
@@ -631,6 +695,12 @@ def main():
                    help="speech loudness threshold (default: auto-calibrated)")
     p.add_argument("--model", default="qwen3-1.7b", help="rkllama model name")
     p.add_argument("--llm-url", default="http://localhost:8080/v1/chat/completions")
+    p.add_argument("--piper", default=None,
+                   help="Piper executable (default: ./piper/piper or PATH)")
+    p.add_argument("--voice-model", default=str(SCRIPT_DIR / "baymax.onnx"),
+                   help="Piper voice model (default: ./baymax.onnx)")
+    p.add_argument("--player", default="aplay",
+                   help="WAV audio player (default: aplay)")
     p.add_argument("--heartbeat", type=float, default=0.0,
                    help="print wake word status every N seconds (default off; "
                         "--verbose uses 2)")
