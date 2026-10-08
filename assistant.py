@@ -911,10 +911,13 @@ def route(user_text, args):
 
 def run_tags(tags):
     """Run skill tags [(tag, arg), ...] and log what happened."""
+    results = []
     for tag, arg in tags:
         name = f"{tag}:{arg}" if arg else tag
         ok, msg = skills.run(tag, arg)
         log("SKILL", f"{name} -> {msg}" if ok else f"{name} FAILED - {msg}")
+        results.append((tag, ok, msg))
+    return results
 
 
 def ask_llm(history, user_text, args, group, web_results=None):
@@ -981,7 +984,13 @@ def ask_llm(history, user_text, args, group, web_results=None):
             and not any(t == "END_CONVERSATION" for t, _ in tags)):
         log("SKILL", "said goodbye without the tag, ending the conversation anyway")
         tags = list(tags) + [("END_CONVERSATION", None)]
-    run_tags(tags)
+    action_results = run_tags(tags)
+    music_result = next((result for result in action_results
+                         if result[0] == "MUSIC_PLAY"), None)
+    if music_result:
+        _, ok, result = music_result
+        reply = (f"I finished playing {result}." if ok else
+                 "I couldn't play music just now. Please check the internet connection and music player.")
 
     if not reply:
         reply = "Okay." if tags else "(empty reply)"
@@ -1051,7 +1060,13 @@ def converse(args, mic, thr, stt, history, turn):
             misses = 0
             tags, reply = fast
             log("SKILL", "obvious command, LLM skipped")
-            run_tags(tags)  # act first, then speak
+            action_results = run_tags(tags)  # act first, then speak
+            music_result = next((result for result in action_results
+                                 if result[0] == "MUSIC_PLAY"), None)
+            if music_result:
+                _, ok, result = music_result
+                reply = (f"I finished playing {result}." if ok else
+                         "I couldn't play music just now. Please check the internet connection and music player.")
             history.append({"role": "user", "content": text + " /no_think"})
             history.append({"role": "assistant", "content": reply})
             del history[:-12]

@@ -147,8 +147,7 @@ def play_youtube_music(query):
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "extract_flat": True,
-        "skip_download": True,
+        "format": "bestaudio/best",
     }
     with yt_dlp.YoutubeDL(options) as downloader:
         result = downloader.extract_info(f"ytsearch1:{query}", download=False)
@@ -156,21 +155,19 @@ def play_youtube_music(query):
     if not entries:
         raise LookupError(f"No YouTube result found for {query!r}")
     entry = entries[0]
-    video_url = entry.get("webpage_url")
-    if not video_url and entry.get("id"):
-        video_url = f"https://www.youtube.com/watch?v={entry['id']}"
-    if not video_url:
-        raise RuntimeError("YouTube search result did not contain a playable URL")
+    audio_url = entry.get("url")
+    if not audio_url:
+        raise RuntimeError("yt-dlp did not resolve a direct audio stream URL")
 
     title = entry.get("title") or query
     print(f"  Playing from YouTube: {title}", flush=True)
     played = subprocess.run(
-        [player, "--no-video", "--ytdl-format=bestaudio", video_url],
+        [player, "--no-video", audio_url],
         check=False,
     )
     if played.returncode:
         raise RuntimeError(f"mpv exited with status {played.returncode}")
-    return f"finished playing {title}"
+    return title
 
 
 # ----------------------------------------------------------- strict matchers

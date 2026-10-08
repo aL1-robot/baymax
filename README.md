@@ -113,10 +113,11 @@ python assistant.py --ptt
 
 Ask Baymax to play music or a named track, for example, “Play some music” or
 “Play Here Comes the Sun by the Beatles.” Baymax searches YouTube and plays the
-first audio result through `mpv`. Playback runs to completion before Baymax
-listens for another request. This uses free, unofficial YouTube search and
-playback, requires an internet connection, and may be affected by YouTube or
-yt-dlp changes.
+first audio result through `mpv`. `yt-dlp` resolves the audio stream URL, so
+`mpv` does not need its own YouTube download helper. Playback runs to completion
+before Baymax listens for another request. This uses free, unofficial YouTube
+search and playback, requires an internet connection, and may be affected by
+YouTube or yt-dlp changes.
 
 To use a different Piper executable or voice model:
 
