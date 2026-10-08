@@ -1,0 +1,15 @@
+pyyaml
+huggingface_hub
+pyarrow
+soundfile
+numpy==1.26.4
+scipy
+setuptools<81
+tflite-runtime==2.13.0
+pymicro-features==2.0.2
+faster-whisper
+
+piper-tts
+
+#
+spidev
