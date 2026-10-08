@@ -250,21 +250,31 @@ def _add_leading_silence(path):
 
 def _synthesize_cached(voice, text, wav_file, args):
     """Pass pacing settings across old and new Piper Python APIs."""
+    wav_file.setnchannels(1)
+    wav_file.setsampwidth(2)
+    wav_file.setframerate(voice.config.sample_rate)
+
     synthesize_wav = getattr(voice, "synthesize_wav", None)
     if callable(synthesize_wav):
-        parameters = inspect.signature(synthesize_wav).parameters
-        if "syn_config" in parameters:
+        method_parameters = inspect.signature(synthesize_wav).parameters
+        kwargs = {}
+        if "syn_config" in method_parameters:
             from piper import SynthesisConfig
 
-            synthesize_wav(
-                text,
-                wav_file,
-                syn_config=SynthesisConfig(
-                    length_scale=args.length_scale,
-                    sentence_silence=args.sentence_silence,
-                ),
-            )
-            return
+            config_parameters = inspect.signature(SynthesisConfig).parameters
+            config_values = {
+                "length_scale": args.length_scale,
+                "sentence_silence": args.sentence_silence,
+            }
+            config_kwargs = {
+                name: value for name, value in config_values.items()
+                if name in config_parameters
+            }
+            kwargs["syn_config"] = SynthesisConfig(**config_kwargs)
+        if "sentence_silence" in method_parameters:
+            kwargs["sentence_silence"] = args.sentence_silence
+        synthesize_wav(text, wav_file, **kwargs)
+        return
     synthesize = getattr(voice, "synthesize", None)
     if callable(synthesize):
         parameters = inspect.signature(synthesize).parameters
@@ -273,9 +283,6 @@ def _synthesize_cached(voice, text, wav_file, args):
             kwargs["length_scale"] = args.length_scale
         if "sentence_silence" in parameters:
             kwargs["sentence_silence"] = args.sentence_silence
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(voice.config.sample_rate)
         result = synthesize(text, wav_file, **kwargs)
         if result is not None and hasattr(result, "__iter__"):
             for _ in result:
