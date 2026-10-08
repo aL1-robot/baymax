@@ -126,12 +126,16 @@ environment that runs Baymax:
 python -m pip install --upgrade yt-dlp
 ```
 
-Baymax first tries YouTube's `web_safari` and `web_embedded` player clients,
-then retries with `default` and `web_embedded`; both exclude the currently
-problematic `tv_downgraded` client. It logs the installed yt-dlp version and
-the client strategy used.
-The Python 3.9 deprecation warning means yt-dlp support for that Python version
-is ending. Prefer Python 3.10 or newer for the assistant environment.
+Baymax first tries the `default` and `web_embedded` clients with one search
+result, then retries `web_safari` and `web_embedded` with up to five results if
+needed. Both strategies exclude the problematic `tv_downgraded` client. This
+puts the client that worked on your device first and avoids waiting for several
+known-bad results before playback starts. Errors from a failed strategy stay
+quiet if the fallback succeeds. mpv's playback progress is also hidden.
+
+The Python 3.10 deprecation warning is from yt-dlp and does not stop playback.
+Upgrade to Python 3.11 or newer when convenient to remove the warning and stay
+on a supported Python version.
 
 To use a different Piper executable or voice model:
 
