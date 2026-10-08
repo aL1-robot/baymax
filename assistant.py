@@ -893,6 +893,9 @@ def search_web(query):
 
 def route(user_text, args, history=None):
     """Stage 1: which skill group (or UNSUPPORTED / UNCLEAR / NONE)?"""
+    if skills.music_request_intent(user_text, history or []):
+        log("ROUTE", "MUSIC (play request or confirmation)")
+        return "MUSIC"
     fast = skills.fast_group(user_text)
     if fast:
         log("ROUTE", f"{fast} (obvious command, router skipped)")
@@ -944,6 +947,8 @@ def music_failure_reply(error):
     message = error.lower()
     if "yt-dlp" in message or "youtube extractor" in message:
         return "I couldn't get audio from YouTube. Please update yt-dlp and try again."
+    if "no youtube title matched" in message:
+        return "I couldn't find a YouTube result matching that artist or song, so I did not play a different track. Please say the title again."
     return "I couldn't play music just now. Please check the internet connection and music player."
 
 
@@ -1017,6 +1022,19 @@ def ask_llm(history, user_text, args, group, web_results=None):
     reply, tags = skills.extract(reply)
     if web_results:
         tags = []  # Web snippets are untrusted and must not trigger a skill.
+    elif group == "MUSIC":
+        music_intent = skills.music_request_intent(user_text, history)
+        tags = [
+            (tag, arg) for tag, arg in tags
+            if music_intent and skills.SKILLS[tag][0] == "MUSIC" and arg
+        ]
+        if not any(tag == "MUSIC_PLAY" for tag, _ in tags):
+            query = skills.music_query_for_request(user_text, history)
+            if query:
+                log("SKILL", f"model omitted music action; using explicit request: {query}")
+                tags = [("MUSIC_PLAY", query)]
+            elif music_intent:
+                reply = "Which artist or song would you like me to look for?"
     elif not tags:
         tags = skills.fallback(user_text)
         if tags:

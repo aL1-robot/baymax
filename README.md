@@ -122,7 +122,10 @@ reported after the player exits. This uses free, unofficial YouTube search and
 playback, requires an internet connection, and may be affected by YouTube or
 yt-dlp changes.
 Music requests use the recent conversation as context, so follow-ups such as
-“play one of their songs” can refer to an artist discussed earlier.
+“play one of their songs” can refer to an artist discussed earlier. Baymax
+checks YouTube result titles against the requested artist/song before playback;
+if no result matches, it reports that instead of playing the first unrelated
+result.
 
 If YouTube extraction stops working, update yt-dlp using the same Python
 environment that runs Baymax:
@@ -131,12 +134,13 @@ environment that runs Baymax:
 python -m pip install --upgrade yt-dlp
 ```
 
-Baymax first tries the `default` and `web_embedded` clients with one search
-result, then retries `web_safari` and `web_embedded` with up to five results if
-needed. Both strategies exclude the problematic `tv_downgraded` client. This
-puts the client that worked on your device first and avoids waiting for several
-known-bad results before playback starts. Errors from a failed strategy stay
-quiet if the fallback succeeds. mpv's playback progress is also hidden.
+Baymax first tries the `default` and `web_embedded` clients with up to five
+search results, then retries `web_safari` and `web_embedded` with up to five
+results if needed. Both strategies exclude the problematic `tv_downgraded`
+client. This puts the client that worked on your device first and avoids
+waiting for several known-bad results before playback starts. Errors from a
+failed strategy stay quiet if the fallback succeeds. mpv's playback progress is
+also hidden.
 
 The Python 3.10 deprecation warning is from yt-dlp and does not stop playback.
 Upgrade to Python 3.11 or newer when convenient to remove the warning and stay

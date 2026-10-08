@@ -49,6 +49,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 
 
 # --------------------------------------------------------------- LED strip
@@ -133,6 +134,113 @@ def end_conversation():
     return "ending the conversation, going idle"
 
 
+_MUSIC_QUERY_FILLERS = {
+    "a", "about", "anything", "any", "band", "by", "for", "music",
+    "of", "on", "one", "play", "please", "popular", "put", "song", "some",
+    "something",
+    "the", "their", "track", "with",
+}
+_MUSIC_GENERIC_QUERIES = {
+    "any song", "any music", "anything", "something", "some music", "music",
+    "a song", "popular music", "any song please", "anything please",
+}
+_MUSIC_CONFIRMATIONS = re.compile(
+    r"^\s*(?:yes|yeah|yep|sure|okay|ok|go ahead|sounds good|do that)[.! ]*$",
+    re.I,
+)
+
+
+def _music_title_tokens(text):
+    normalized = unicodedata.normalize("NFKD", text).encode(
+        "ascii", "ignore"
+    ).decode("ascii").lower()
+    return re.findall(r"[a-z0-9]+", normalized)
+
+
+def _music_query_terms(query):
+    return {
+        token for token in _music_title_tokens(query)
+        if token not in _MUSIC_QUERY_FILLERS
+    }
+
+
+def music_request_intent(text, history=()):
+    """Recognize play requests, including short confirmations of a song offer."""
+    if re.search(r"\b(?:play|put on|queue)\b", text, re.I):
+        return not re.search(r"\b(?:game|video game|movie)\b", text, re.I)
+    if not _MUSIC_CONFIRMATIONS.match(text):
+        return False
+    recent = list(history)[-6:]
+    assistant_offered_song = any(
+        message.get("role") == "assistant"
+        and re.search(r"\b(?:how about|let me|i can|shall i|would you like)\b",
+                      message.get("content", ""), re.I)
+        and (
+            re.search(r"\b(?:song|music|play)\b", message.get("content", ""), re.I)
+            or re.search(r"[\"'“][^\"'”]+[\"'”]", message.get("content", ""))
+            or re.search(r"\bby\s+[A-Z]", message.get("content", ""))
+        )
+        for message in recent
+    )
+    user_requested_music = any(
+        message.get("role") == "user"
+        and re.search(r"\b(?:play|music|song|track)\b", message.get("content", ""), re.I)
+        for message in recent
+    )
+    return assistant_offered_song and user_requested_music
+
+
+def music_query_for_request(text, history=()):
+    """Derive only explicit/generic requests or a confirmed song offer."""
+    if _MUSIC_CONFIRMATIONS.match(text):
+        if not music_request_intent(text, history):
+            return None
+        for message in reversed(list(history)[-6:]):
+            if message.get("role") != "assistant":
+                continue
+            content = message.get("content", "")
+            match = re.search(
+                r"[\"'“]([^\"'”]+)[\"'”](?:\s+by\s+([A-Z][\w& .'-]+?))?"
+                r"(?=[,!.?]|$)",
+                content,
+            )
+            if match:
+                return " ".join(part.strip() for part in match.groups() if part)
+            match = re.search(
+                r"\b(?:how about|let me play|i can play|shall i play)\s+"
+                r"(.+?)(?:[?!.,]|$)",
+                content,
+                re.I,
+            )
+            if match:
+                query = match.group(1).strip(" \"'“”")
+                if _music_query_terms(query):
+                    return query[:160]
+        return None
+
+    match = re.search(r"\b(?:play|put on|queue)\s+(.+)$", text, re.I)
+    if not match or not music_request_intent(text, history):
+        return None
+    query = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?'\"")
+    query = re.sub(r"^(?:(?:me|some|any|a|the)\s+)+", "", query, flags=re.I)
+    query = re.sub(r"^(?:song|music|track)\s+", "", query, flags=re.I).strip()
+    if not query or not _music_query_terms(query):
+        return "popular music"
+    if query.lower() in _MUSIC_GENERIC_QUERIES:
+        return "popular music"
+    if re.search(r"\b(?:them|their|they|that|those|one)\b", query, re.I):
+        return None
+    return query[:160]
+
+
+def _music_title_matches(query, title):
+    terms = _music_query_terms(query)
+    if not terms:
+        return True
+    title_tokens = set(_music_title_tokens(title))
+    return terms <= title_tokens
+
+
 def play_youtube_music(query):
     """Search YouTube and play one audio result to completion with mpv."""
     player = shutil.which("mpv")
@@ -145,10 +253,10 @@ def play_youtube_music(query):
 
     version = getattr(getattr(yt_dlp, "version", None), "__version__", "unknown")
     player_attempts = (
-        (["default", "web_embedded", "-tv_downgraded"], 1),
+        (["default", "web_embedded", "-tv_downgraded"], 5),
         (["web_safari", "web_embedded", "-tv_downgraded"], 5),
     )
-    playable = None
+    playable = []
     last_error = None
     extraction_errors = []
     for clients, result_limit in player_attempts:
@@ -184,14 +292,26 @@ def play_youtube_music(query):
             continue
 
         entries = result.get("entries") if result else None
-        playable = next(
-            (entry for entry in entries or [] if entry and entry.get("url")),
-            None,
+        playable.extend(
+            entry for entry in entries or []
+            if entry and entry.get("url") and entry.get("title")
         )
         extraction_errors.extend(attempt_errors)
         if playable:
-            break
+            matching = next(
+                (entry for entry in playable
+                 if _music_title_matches(query, entry["title"])),
+                None,
+            )
+            if matching:
+                playable = [matching]
+                break
 
+    if playable and not _music_title_matches(query, playable[0]["title"]):
+        raise LookupError(
+            f"No YouTube title matched {query!r}. I did not play a different "
+            "result. Please repeat the artist or song title."
+        )
     if not playable:
         detail = " ".join(dict.fromkeys(extraction_errors))
         error = RuntimeError(
@@ -203,7 +323,7 @@ def play_youtube_music(query):
         if last_error:
             raise error from last_error
         raise error
-    entry = playable
+    entry = playable[0]
     audio_url = entry["url"]
 
     title = entry.get("title") or query
@@ -295,6 +415,12 @@ CONVO_EXAMPLES = [
 MUSIC_EXAMPLES = [
     ("Play some music.",
      "I will look for some music and start playing it. "
+     "[[MUSIC_PLAY:popular music]]"),
+    ("Play any song.",
+     "I will choose a popular song and start playing it. "
+     "[[MUSIC_PLAY:popular music]]"),
+    ("Just play anything.",
+     "I will choose a popular song and start playing it. "
      "[[MUSIC_PLAY:popular music]]"),
     ("Play Here Comes the Sun by the Beatles.",
      "I will look for Here Comes the Sun by the Beatles and start playing it. "
@@ -435,7 +561,10 @@ def group_prompt(group):
     elif group == "MUSIC":
         lines.insert(
             1,
-            "Use the recent conversation to resolve references such as 'their "
+            "When the person directly asks you to play something, do not ask "
+            "what kind they prefer; choose a popular song if they said any "
+            "song or anything, and include MUSIC_PLAY. Use the recent "
+            "conversation to resolve references such as 'their "
             "songs' or 'that band'. Make each MUSIC_PLAY query self-contained "
             "by naming the song or artist established in context. If context "
             "does not identify them, ask a brief clarifying question and do not "
