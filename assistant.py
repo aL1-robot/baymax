@@ -408,17 +408,8 @@ def _speak_audio(text, args):
 
 
 def speak(text, args):
-    """Speak over music, then leave it ducked for the next listening window."""
-    process = skills.music_state["process"]
-    music_active = process is not None and process.poll() is None
-    try:
-        if music_active:
-            skills.set_youtube_music_volume(0)
-        _speak_audio(text, args)
-    finally:
-        process = skills.music_state["process"]
-        if process is not None and process.poll() is None:
-            skills.set_youtube_music_volume(skills.MUSIC_LISTEN_VOLUME)
+    """Synthesize and play one reply."""
+    _speak_audio(text, args)
 
 
 # ---------------------------------------------------------------------- mic
@@ -951,31 +942,15 @@ def skill_failure_reply(results):
         return None
     tag, message = failures[0]
     if tag == "MUSIC_PLAY":
-        if "already playing" in message.lower():
-            return "Music is already playing. Say stop music first."
         return music_failure_reply(message)
-    if tag == "MUSIC_STOP":
-        return "I couldn't stop the music player. Please check mpv."
     return "I couldn't complete that action. Please try again."
 
 
 def play_started_reply(results):
     result = next((item for item in results if item[0] == "MUSIC_PLAY"), None)
     if result and result[1]:
-        return f"Now playing {result[2]}. Say stop music to stop."
-    stopped = next((item for item in results if item[0] == "MUSIC_STOP"), None)
-    if stopped and stopped[1]:
-        if stopped[2] == "no music was playing":
-            return "There was no music playing."
-        return "I stopped the music."
+        return f"The music has finished playing: {result[2]}."
     return None
-
-
-def announce_music_failure(args, error):
-    log("SKILL", error)
-    reply = "The music stopped unexpectedly. Please try playing it again."
-    print(f"\n  Baymax: {reply}\n", flush=True)
-    speak(reply, args)
 
 
 def ask_llm(history, user_text, args, group, web_results=None):
@@ -1061,47 +1036,12 @@ def converse(args, mic, thr, stt, history, turn):
     misses = 0  # misunderstood turns in a row
     junk = 0    # noise-only transcripts in a row
     while True:
-        music_active, music_error = skills.youtube_music_status()
-        if music_error:
-            announce_music_failure(args, music_error)
-            return "music playback failed"
-
-        if music_active:
-            skills.set_youtube_music_volume(skills.MUSIC_LISTEN_VOLUME)
-        try:
-            pcm = record_utterance(
-                mic, thr, max_wait=wait, max_len=2.5 if music_active else 15.0
-            )
-            if pcm is not None and args.save_wavs:
-                log("REC", f"saved to {save_wav(pcm, turn)}")
-            if pcm is not None:
-                text, conf = transcribe(stt, pcm)
-        finally:
-            if music_active:
-                skills.set_youtube_music_volume(100)
+        pcm = record_utterance(mic, thr, max_wait=wait)
         if pcm is None:
-            music_active, music_error = skills.youtube_music_status()
-            if music_error:
-                announce_music_failure(args, music_error)
-                return "music playback failed"
-            if music_active:
-                wait = 0.8
-                continue
             return "no speech"
-        music_active, music_error = skills.youtube_music_status()
-        if music_error:
-            announce_music_failure(args, music_error)
-            return "music playback failed"
-
-        music_command = skills.fast_action(text)
-        can_stop_music = bool(
-            music_command and any(tag == "MUSIC_STOP" for tag, _ in music_command[0])
-        )
-        if music_active and not can_stop_music:
-            vlog("MUSIC", f"ignoring possible lyrics/noise during playback: {text!r}")
-            mic.flush()
-            wait = 0.8
-            continue
+        if args.save_wavs:
+            log("REC", f"saved to {save_wav(pcm, turn)}")
+        text, conf = transcribe(stt, pcm)
 
         # Whisper "You" / "Thank you" / empty = it heard noise, not a request.
         # Don't count it as a misunderstanding; just keep listening.
@@ -1117,7 +1057,7 @@ def converse(args, mic, thr, stt, history, turn):
         print(f"\n  You:    {text}\n", flush=True)
 
         t0 = time.monotonic()
-        fast = music_command if music_active and can_stop_music else None
+        fast = None
         local_reply = local_fact_reply(text)
         web_results = None
         web_question = _is_web_question(text)
@@ -1130,13 +1070,12 @@ def converse(args, mic, thr, stt, history, turn):
             ])
             del history[:-12]
             log("FACT", "answered using local time or dictionary API")
-        elif looks_garbled(conf) and not fast:
+        elif looks_garbled(conf):
             log("STT", f"not confident (logprob={conf['logprob']}, "
                        f"no_speech={conf['no_speech']}), asking to repeat")
             group = "UNCLEAR"
         else:
-            if fast is None:
-                fast = skills.fast_action(text)
+            fast = skills.fast_action(text)
             group = "FAST" if fast else ("NONE" if web_question else route(text, args))
 
         if local_reply is not None:
@@ -1181,30 +1120,19 @@ def converse(args, mic, thr, stt, history, turn):
                 reply = ask_llm(history, text, args, group)
 
         print(f"\n  Baymax: {reply}\n", flush=True)
-        player = skills.music_state["process"]
-        if player is not None and player.poll() is None:
-            log("TTS", "skipping playback confirmation; the pre-play announcement was spoken")
-        else:
-            speak(reply, args)
+        speak(reply, args)
         vlog("TURN", f"total {time.monotonic() - t0:.1f}s (route + reply)")
 
         if skills.state["end_conversation"]:
             skills.state["end_conversation"] = False
             return "ended by you"
-        music_active, music_error = skills.youtube_music_status()
-        if music_error:
-            announce_music_failure(args, music_error)
-            return "music playback failed"
-        if args.followup <= 0 and not music_active:
+        if args.followup <= 0:
             return "follow-up disabled"
 
         time.sleep(SETTLE_SECONDS)  # let relay clicks / speaker tail die down
         mic.flush()                 # drop audio that piled up while we were busy
-        wait = 0.8 if music_active else args.followup
-        if music_active:
-            log("CONVO", "listening for 'stop music' while music plays...")
-        else:
-            log("CONVO", f"listening for a follow-up ({args.followup:.0f}s)...")
+        wait = args.followup
+        log("CONVO", f"listening for a follow-up ({args.followup:.0f}s)...")
 
 
 def main():
@@ -1332,10 +1260,6 @@ def main():
     except KeyboardInterrupt:
         log("INIT", "stopped.")
     finally:
-        try:
-            skills.stop_youtube_music()
-        except Exception as error:
-            log("ERROR", f"could not stop music during shutdown: {error}")
         mic.stop()
 
 

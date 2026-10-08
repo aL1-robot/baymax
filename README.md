@@ -115,17 +115,12 @@ Ask Baymax to play music or a named track, for example, “Play some music” or
 “Play Here Comes the Sun by the Beatles.” Baymax searches YouTube and plays the
 first audio result through `mpv`. Baymax says it will look for the request
 before starting the YouTube search. `yt-dlp` resolves the audio stream URL, so
-`mpv` does not need its own YouTube download helper. Playback runs in the
-background while Baymax listens for “stop music”; it lowers music to 15% while
-listening and mutes it while speaking. Unrelated speech and song lyrics are
-ignored during playback. Baymax announces if the player exits with an error.
-After mpv starts, the track title is shown in the console rather than spoken
-over music, avoiding an ALSA device-busy conflict with `aplay`.
-This reduces music masking, but is not acoustic echo cancellation: unlike
-Alexa, this setup does not have a microphone array or an echo-cancellation
-system. Recognition can still be affected by speaker volume, distance, and room
-acoustics. This uses free, unofficial YouTube search and playback, requires an
-internet connection, and may be affected by YouTube or yt-dlp changes.
+`mpv` does not need its own YouTube download helper. Playback runs to
+completion before Baymax listens for another request. Baymax cannot hear a
+voice command to stop the track while it is playing. Playback errors are
+reported after the player exits. This uses free, unofficial YouTube search and
+playback, requires an internet connection, and may be affected by YouTube or
+yt-dlp changes.
 
 If YouTube extraction stops working, update yt-dlp using the same Python
 environment that runs Baymax:

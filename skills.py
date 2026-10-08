@@ -43,16 +43,12 @@ Test without any voice:
     python skills.py fast "turn the lamp on"        (try the fast path)
 """
 
-import json
 import random
 import re
 import shutil
-import socket
 import subprocess
 import sys
-import tempfile
 import time
-from pathlib import Path
 
 
 # --------------------------------------------------------------- LED strip
@@ -130,23 +126,6 @@ led = LedStrip()
 
 # Flags that skills can raise for assistant.py to act on.
 state = {"end_conversation": False}
-MUSIC_LISTEN_VOLUME = 15
-music_state = {
-    "process": None,
-    "title": None,
-    "ipc_path": None,
-    "temp_dir": None,
-    "volume": 100,
-}
-
-
-def _clear_music_state():
-    temp_dir = music_state["temp_dir"]
-    music_state.update(
-        process=None, title=None, ipc_path=None, temp_dir=None, volume=100
-    )
-    if temp_dir:
-        temp_dir.cleanup()
 
 
 def end_conversation():
@@ -154,74 +133,8 @@ def end_conversation():
     return "ending the conversation, going idle"
 
 
-def youtube_music_status():
-    """Return (is_playing, error_message) and reap a completed player process."""
-    process = music_state["process"]
-    if process is None:
-        return False, None
-    result = process.poll()
-    if result is None:
-        return True, None
-    title = music_state["title"] or "the track"
-    _clear_music_state()
-    if result:
-        return False, f"mpv exited with status {result} while playing {title}"
-    return False, None
-
-
-def stop_youtube_music():
-    """Stop the current YouTube music player, if one is active."""
-    active, _ = youtube_music_status()
-    if not active:
-        return "no music was playing"
-    process = music_state["process"]
-    title = music_state["title"] or "the music"
-    process.terminate()
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
-    _clear_music_state()
-    return title
-
-
-def set_youtube_music_volume(volume):
-    """Set mpv's volume through its private local IPC socket."""
-    if not 0 <= volume <= 100:
-        raise ValueError("music volume must be between 0 and 100")
-    process = music_state["process"]
-    if process is None or process.poll() is not None:
-        return False
-    if music_state["volume"] == volume:
-        return True
-    ipc_path = music_state["ipc_path"]
-    if not ipc_path:
-        raise RuntimeError("mpv control socket is unavailable")
-
-    request = json.dumps({
-        "command": ["set_property", "volume", volume],
-    }).encode("utf-8") + b"\n"
-    last_error = None
-    for _ in range(10):
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-                connection.settimeout(0.2)
-                connection.connect(ipc_path)
-                connection.sendall(request)
-            music_state["volume"] = volume
-            return True
-        except OSError as error:
-            last_error = error
-            time.sleep(0.05)
-    raise RuntimeError(f"could not set mpv volume: {last_error}") from last_error
-
-
 def play_youtube_music(query):
-    """Search YouTube and start one audio result with mpv in the background."""
-    active, _ = youtube_music_status()
-    if active:
-        raise RuntimeError("music is already playing; say stop music first")
+    """Search YouTube and play one audio result to completion with mpv."""
     player = shutil.which("mpv")
     if not player:
         raise FileNotFoundError("mpv is not installed; install it with your system package manager")
@@ -295,24 +208,14 @@ def play_youtube_music(query):
 
     title = entry.get("title") or query
     print(f"  Playing from YouTube: {title}", flush=True)
-    temp_dir = tempfile.TemporaryDirectory(prefix="baymax-mpv-")
-    ipc_path = str(Path(temp_dir.name) / "mpv.sock")
-    try:
-        process = subprocess.Popen(
-            [
-                player, "--no-video", "--no-terminal", "--really-quiet",
-                "--input-ipc-server=" + ipc_path, audio_url,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        temp_dir.cleanup()
-        raise
-    music_state.update(
-        process=process, title=title, ipc_path=ipc_path,
-        temp_dir=temp_dir, volume=100,
+    played = subprocess.run(
+        [player, "--no-video", "--no-terminal", "--really-quiet", audio_url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
     )
+    if played.returncode:
+        raise RuntimeError(f"mpv exited with status {played.returncode}")
     return title
 
 
@@ -360,11 +263,6 @@ def _convo_fast(text):
 
 def _music_fast(text):
     """Return a YouTube search query for explicit play requests."""
-    if (re.search(r"\b(?:stop(?:\s+playing)?|turn off|end|cancel)\s+"
-                  r"(?:(?:the|this)\s+)?"
-                  r"(?:music|song|track|it)\b", text, re.I)
-            or re.match(r"^\s*(?:stop|stop playing)[.!?]*\s*$", text, re.I)):
-        return [("MUSIC_STOP", None)]
     if re.match(r"^\s*(what|why|how|who|when|where|which)\b", text, re.I):
         return []
     match = re.search(r"\b(?:play|put on)\s+(.+)$", text, re.I)
@@ -412,12 +310,11 @@ CONVO_EXAMPLES = [
 
 MUSIC_EXAMPLES = [
     ("Play some music.",
-     "I played some music for you. [[MUSIC_PLAY:popular music]]"),
+     "I will look for some music and start playing it. "
+     "[[MUSIC_PLAY:popular music]]"),
     ("Play Here Comes the Sun by the Beatles.",
-     "I played Here Comes the Sun by the Beatles. "
+     "I will look for Here Comes the Sun by the Beatles and start playing it. "
      "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
-    ("Stop the music.",
-     "I stopped the music. [[MUSIC_STOP]]"),
 ]
 
 # "about"   : read by the router (what requests belong to this group)
@@ -438,7 +335,7 @@ GROUPS = {
         "fast": _convo_fast,
     },
     "MUSIC": {
-        "about": "play music from YouTube or stop the currently playing music",
+        "about": "play requested songs or music from YouTube",
         "ability": "play music from YouTube",
         "examples": MUSIC_EXAMPLES,
         "fast": _music_fast,
@@ -461,8 +358,6 @@ SKILLS = {
                          "next wake word",                        end_conversation, None),
     "MUSIC_PLAY": ("MUSIC", "search for and play a song or music on YouTube",
                    play_youtube_music, "QUERY"),
-    "MUSIC_STOP": ("MUSIC", "stop the currently playing music",
-                   stop_youtube_music, None),
 }
 
 ROUTER_EXAMPLES_PER_GROUP = 3
@@ -483,7 +378,6 @@ FAST_REPLIES = {
                          "Goodbye. I am glad I could help.",
                          "Going quiet now. Say my name when you need me."],
     "MUSIC_PLAY": ["I played {arg} for you."],
-    "MUSIC_STOP": ["I stopped the music."],
 }
 
 # Baymax-style lines for when speech wasn't understood (no LLM call needed).
