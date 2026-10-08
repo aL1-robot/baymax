@@ -149,6 +149,11 @@ def play_youtube_music(query):
         "noplaylist": True,
         "ignoreerrors": True,
         "format": "bestaudio/best",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web_safari", "web_embedded", "-tv_downgraded"],
+            },
+        },
     }
     try:
         with yt_dlp.YoutubeDL(options) as downloader:
