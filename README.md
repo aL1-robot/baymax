@@ -7,6 +7,7 @@ A local voice assistant for ARM devices like the Orange Pi 5. It combines a wake
 - Wake-word detection with a local on-device model
 - Speech-to-text using Faster Whisper
 - Text-to-speech via Piper
+- Local-time answers, online dictionary definitions, and free web search
 - Local model storage under `~/models`
 - Works well on Ubuntu/Debian-based ARM systems
 
@@ -75,6 +76,20 @@ removed after playback. Delete `voice_cache/` to remove the prebuilt audio and
 have it recreated next startup.
 Recorded microphone audio is not saved unless `--save-wavs` is enabled; when
 enabled, utterances are saved under `~/baymax_wavs`.
+
+## Time, definitions, and web search
+
+- Time questions use the Orange Pi's local clock and configured timezone.
+- Word definitions use the free DictionaryAPI.dev endpoint.
+- Factual questions use DuckDuckGo's no-key HTML search and Wikipedia's
+  no-key MediaWiki API. Baymax gives the results to the local LLM to summarize
+  and prints the source links.
+
+These lookups require an internet connection. The spoken question is sent to
+the relevant public service; do not ask Baymax to search for private
+information. Free services can be unavailable or limit requests, and web
+results may be incomplete. Baymax will say when a search returns no useful
+results rather than making up an answer.
 
 Verbose mode for troubleshooting:
 
