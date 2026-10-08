@@ -1,5 +1,6 @@
 # Getting Started
 
+python -m venv .venv
 python install -r requirements.txt
 
 # Download piper latest ARM64 release archive
