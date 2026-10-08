@@ -193,6 +193,17 @@ def _audio_tools(args):
     return model, piper, player
 
 
+def _has_audio_frames(path):
+    try:
+        with wave.open(str(path), "rb") as wav_file:
+            return (wav_file.getnchannels() > 0
+                    and wav_file.getsampwidth() > 0
+                    and wav_file.getframerate() > 0
+                    and wav_file.getnframes() > 0)
+    except (EOFError, OSError, wave.Error):
+        return False
+
+
 def initialize_voice_cache(args):
     """Build persistent WAVs for fixed skill replies that are not cached yet."""
     model, _, _ = _audio_tools(args)
@@ -220,7 +231,7 @@ def initialize_voice_cache(args):
         if path not in expected_paths:
             path.unlink()
     missing = [(phrase, path) for phrase, path in cache_paths.items()
-               if not path.is_file() or path.stat().st_size == 0]
+               if not _has_audio_frames(path)]
 
     if missing:
         from piper import PiperVoice
@@ -232,11 +243,15 @@ def initialize_voice_cache(args):
                     prefix=".building-", dir=str(cache_dir)) as tmp:
                 generated_path = Path(tmp) / "reply.wav"
                 with wave.open(str(generated_path), "wb") as wav_file:
-                    wav_file.setnchannels(1)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(voice.config.sample_rate)
-                    voice.synthesize(phrase, wav_file)
-                if not generated_path.is_file() or generated_path.stat().st_size == 0:
+                    synthesize_wav = getattr(voice, "synthesize_wav", None)
+                    if callable(synthesize_wav):
+                        synthesize_wav(phrase, wav_file)
+                    else:
+                        wav_file.setnchannels(1)
+                        wav_file.setsampwidth(2)
+                        wav_file.setframerate(voice.config.sample_rate)
+                        voice.synthesize(phrase, wav_file)
+                if not _has_audio_frames(generated_path):
                     raise RuntimeError(f"Piper produced no audio for cached reply: {phrase}")
                 generated_path.replace(path)
 
@@ -250,8 +265,9 @@ def speak(text, args):
     model, piper, player = _audio_tools(args)
     cached_path = VOICE_CACHE.get(text)
     temporary = None
-    if cached_path and cached_path.is_file() and cached_path.stat().st_size:
+    if cached_path and _has_audio_frames(cached_path):
         audio_path = cached_path
+        log("TTS", "playing cached skill voice")
     else:
         temporary = tempfile.TemporaryDirectory(prefix="baymax-tts-")
         audio_path = Path(temporary.name) / "reply.wav"
