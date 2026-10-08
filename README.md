@@ -67,6 +67,14 @@ played through the default ALSA output:
 python assistant.py
 ```
 
+On first startup, the assistant generates the fixed skill-response voices and
+stores them in `voice_cache/`. Later starts reuse those WAV files. This cache
+contains only the fixed skill replies; generated conversational replies and
+variable brightness replies are temporary and removed after playback. Delete
+`voice_cache/` to remove the prebuilt audio and have it recreated next startup.
+Recorded microphone audio is not saved unless `--save-wavs` is enabled; when
+enabled, utterances are saved under `~/baymax_wavs`.
+
 Verbose mode for troubleshooting:
 
 ```bash
@@ -85,6 +93,8 @@ To use a different Piper executable or voice model:
 python assistant.py --piper /path/to/piper \
   --voice-model /path/to/my_voice.onnx
 ```
+
+Set a different cache location with `--voice-cache /path/to/cache`.
 
 ## TTS example with a custom model
 

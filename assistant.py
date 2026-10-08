@@ -34,6 +34,7 @@ Usage:
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import queue
@@ -106,6 +107,7 @@ JUNK = {""}
 IDLE_DEAF_CHUNKS = 150  # after a conversation ends, ignore ~1.5 s of audio (10 ms each)
 
 VERBOSE = False
+VOICE_CACHE = {}
 
 
 # ------------------------------------------------------------------ logging
@@ -164,8 +166,7 @@ def save_wav(pcm, turn):
 
 
 # ----------------------------------------------------------------------- TTS
-def speak(text, args):
-    """Generate a reply with Piper and play it through ALSA."""
+def _audio_tools(args):
     model = Path(args.voice_model).expanduser()
     if not model.is_file():
         raise FileNotFoundError(f"Piper voice model not found: {model}")
@@ -189,27 +190,91 @@ def speak(text, args):
         raise FileNotFoundError(
             f"Audio player not found: {args.player} (install it or pass --player)"
         )
+    return model, piper, player
 
-    with tempfile.TemporaryDirectory(prefix="baymax-tts-") as tmp:
-        audio_path = Path(tmp) / "reply.wav"
-        log("TTS", "generating speech...")
-        generated = subprocess.run(
-            [piper, "--model", str(model), "--output_file", str(audio_path)],
-            input=(text + "\n").encode("utf-8"),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            check=False,
+
+def initialize_voice_cache(args):
+    """Build persistent WAVs for fixed skill replies that are not cached yet."""
+    model, _, _ = _audio_tools(args)
+    cache_dir = Path(args.voice_cache).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    model_stat = model.stat()
+    model_key = hashlib.sha256(
+        f"{model.resolve()}:{model_stat.st_size}:{model_stat.st_mtime_ns}".encode()
+    ).hexdigest()[:12]
+    phrases = sorted({
+        reply
+        for replies in skills.FAST_REPLIES.values()
+        for reply in replies
+        if "{" not in reply
+    })
+    cache_paths = {
+        phrase: cache_dir / (
+            f"skill-{model_key}-"
+            f"{hashlib.sha256(phrase.encode('utf-8')).hexdigest()[:16]}.wav"
         )
-        if generated.returncode:
-            error = generated.stderr.decode(errors="replace").strip()
-            raise RuntimeError(
-                f"Piper failed with exit code {generated.returncode}"
-                + (f": {error}" if error else "")
-            )
-        if not audio_path.is_file() or audio_path.stat().st_size == 0:
-            raise RuntimeError(f"Piper did not create audio: {audio_path}")
+        for phrase in phrases
+    }
+    expected_paths = set(cache_paths.values())
+    for path in cache_dir.glob("skill-*.wav"):
+        if path not in expected_paths:
+            path.unlink()
+    missing = [(phrase, path) for phrase, path in cache_paths.items()
+               if not path.is_file() or path.stat().st_size == 0]
 
-        log("TTS", "playing reply")
+    if missing:
+        from piper import PiperVoice
+
+        log("INIT", f"preparing {len(missing)} cached skill voices...")
+        voice = PiperVoice.load(str(model))
+        for phrase, path in missing:
+            with tempfile.TemporaryDirectory(
+                    prefix=".building-", dir=str(cache_dir)) as tmp:
+                generated_path = Path(tmp) / "reply.wav"
+                with wave.open(str(generated_path), "wb") as wav_file:
+                    voice.synthesize(phrase, wav_file)
+                if not generated_path.is_file() or generated_path.stat().st_size == 0:
+                    raise RuntimeError(f"Piper produced no audio for cached reply: {phrase}")
+                generated_path.replace(path)
+
+    VOICE_CACHE.clear()
+    VOICE_CACHE.update(cache_paths)
+    log("INIT", f"{len(phrases)} skill voices ready in {cache_dir}")
+
+
+def speak(text, args):
+    """Play a cached skill reply or synthesize a temporary WAV for other text."""
+    model, piper, player = _audio_tools(args)
+    cached_path = VOICE_CACHE.get(text)
+    temporary = None
+    if cached_path and cached_path.is_file() and cached_path.stat().st_size:
+        audio_path = cached_path
+    else:
+        temporary = tempfile.TemporaryDirectory(prefix="baymax-tts-")
+        audio_path = Path(temporary.name) / "reply.wav"
+        log("TTS", "generating speech...")
+        try:
+            generated = subprocess.run(
+                [piper, "--model", str(model), "--output_file", str(audio_path)],
+                input=(text + "\n").encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if generated.returncode:
+                error = generated.stderr.decode(errors="replace").strip()
+                raise RuntimeError(
+                    f"Piper failed with exit code {generated.returncode}"
+                    + (f": {error}" if error else "")
+                )
+            if not audio_path.is_file() or audio_path.stat().st_size == 0:
+                raise RuntimeError(f"Piper did not create audio: {audio_path}")
+        except Exception:
+            temporary.cleanup()
+            raise
+
+    log("TTS", "playing reply")
+    try:
         played = subprocess.run(
             [player, "-q", str(audio_path)],
             stdout=subprocess.DEVNULL,
@@ -222,6 +287,9 @@ def speak(text, args):
                 f"Audio player failed with exit code {played.returncode}"
                 + (f": {error}" if error else "")
             )
+    finally:
+        if temporary:
+            temporary.cleanup()
 
 
 # ---------------------------------------------------------------------- mic
@@ -701,6 +769,8 @@ def main():
                    help="Piper voice model (default: ./baymax.onnx)")
     p.add_argument("--player", default="aplay",
                    help="WAV audio player (default: aplay)")
+    p.add_argument("--voice-cache", default=str(SCRIPT_DIR / "voice_cache"),
+                   help="folder for prebuilt skill reply audio")
     p.add_argument("--heartbeat", type=float, default=0.0,
                    help="print wake word status every N seconds (default off; "
                         "--verbose uses 2)")
@@ -709,6 +779,7 @@ def main():
     args = p.parse_args()
     VERBOSE = args.verbose
     heartbeat = args.heartbeat or (2.0 if args.verbose else 0.0)
+    initialize_voice_cache(args)
 
     vlog("INIT", f"python {sys.version.split()[0]}, mic={args.alsa}, "
                  f"mode={'push-to-talk' if args.ptt else 'wake word'}")
