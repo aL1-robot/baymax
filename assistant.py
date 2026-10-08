@@ -38,6 +38,7 @@ import hashlib
 import io
 import json
 import queue
+import random
 import re
 import shutil
 import subprocess
@@ -108,6 +109,7 @@ IDLE_DEAF_CHUNKS = 150  # after a conversation ends, ignore ~1.5 s of audio (10 
 
 VERBOSE = False
 VOICE_CACHE = {}
+WAKE_REPLIES = ["Yes?", "I'm here.", "Go ahead.", "I'm listening.", "How can I help?", "Yes, what is it?"]
 
 
 # ------------------------------------------------------------------ logging
@@ -205,7 +207,7 @@ def _has_audio_frames(path):
 
 
 def initialize_voice_cache(args):
-    """Build persistent WAVs for fixed skill replies that are not cached yet."""
+    """Build persistent WAVs for fixed replies that are not cached yet."""
     model, _, _ = _audio_tools(args)
     cache_dir = Path(args.voice_cache).expanduser()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +217,7 @@ def initialize_voice_cache(args):
     ).hexdigest()[:12]
     phrases = sorted({
         reply
-        for replies in skills.FAST_REPLIES.values()
+        for replies in [*skills.FAST_REPLIES.values(), WAKE_REPLIES]
         for reply in replies
         if "{" not in reply
     })
@@ -257,7 +259,7 @@ def initialize_voice_cache(args):
 
     VOICE_CACHE.clear()
     VOICE_CACHE.update(cache_paths)
-    log("INIT", f"{len(phrases)} skill voices ready in {cache_dir}")
+    log("INIT", f"{len(phrases)} prebuilt replies ready in {cache_dir}")
 
 
 def speak(text, args):
@@ -863,6 +865,11 @@ def main():
                                 f"going idle - speak now")
                     for _ in range(40):  # skip the tail of the wake word itself
                         mic.read()
+                    wake_reply = random.choice(WAKE_REPLIES)
+                    log("WAKE", f"responding: {wake_reply}")
+                    speak(wake_reply, args)
+                    time.sleep(SETTLE_SECONDS)
+                    mic.flush()  # discard the acknowledgement captured by the mic
 
                 history.clear()  # every conversation starts fresh
                 reason = converse(args, mic, thr, stt, history, turn)

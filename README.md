@@ -67,11 +67,12 @@ played through the default ALSA output:
 python assistant.py
 ```
 
-On first startup, the assistant generates the fixed skill-response voices and
-stores them in `voice_cache/`. Later starts reuse those WAV files. This cache
-contains only the fixed skill replies; generated conversational replies and
-variable brightness replies are temporary and removed after playback. Delete
-`voice_cache/` to remove the prebuilt audio and have it recreated next startup.
+On first startup, the assistant generates the fixed skill responses and short
+wake-word acknowledgements, then stores them in `voice_cache/`. Later starts
+reuse those WAV files. This cache contains only fixed replies; generated
+conversational replies and variable brightness replies are temporary and
+removed after playback. Delete `voice_cache/` to remove the prebuilt audio and
+have it recreated next startup.
 Recorded microphone audio is not saved unless `--save-wavs` is enabled; when
 enabled, utterances are saved under `~/baymax_wavs`.
 
