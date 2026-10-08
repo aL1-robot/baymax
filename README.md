@@ -121,6 +121,8 @@ voice command to stop the track while it is playing. Playback errors are
 reported after the player exits. This uses free, unofficial YouTube search and
 playback, requires an internet connection, and may be affected by YouTube or
 yt-dlp changes.
+Music requests use the recent conversation as context, so follow-ups such as
+“play one of their songs” can refer to an artist discussed earlier.
 
 If YouTube extraction stops working, update yt-dlp using the same Python
 environment that runs Baymax:

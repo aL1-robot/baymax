@@ -261,22 +261,6 @@ def _convo_fast(text):
     return [("END_CONVERSATION", None)] if _END.search(t) else []
 
 
-def _music_fast(text):
-    """Return a YouTube search query for explicit play requests."""
-    if re.match(r"^\s*(what|why|how|who|when|where|which)\b", text, re.I):
-        return []
-    match = re.search(r"\b(?:play|put on)\s+(.+)$", text, re.I)
-    if not match:
-        return []
-    query = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?'\"")
-    query = re.sub(r"^(?:me\s+)?(?:some\s+)?", "", query, flags=re.I).strip()
-    if query.lower().startswith("the song "):
-        query = query[9:].strip()
-    if not query or query.lower() in {"music", "some music", "something"}:
-        query = "popular music"
-    return [("MUSIC_PLAY", query[:160])]
-
-
 # ------------------------------------------------------------- the index
 # Small models follow examples far better than rules. In each example list, a
 # reply WITH a tag is a positive example; a reply without one is a negative
@@ -315,6 +299,9 @@ MUSIC_EXAMPLES = [
     ("Play Here Comes the Sun by the Beatles.",
      "I will look for Here Comes the Sun by the Beatles and start playing it. "
      "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
+    ("Play one of their songs.",
+     "I will look for a song by the band we were just discussing and start "
+     "playing it. [[MUSIC_PLAY:the band from our conversation]]"),
 ]
 
 # "about"   : read by the router (what requests belong to this group)
@@ -338,7 +325,6 @@ GROUPS = {
         "about": "play requested songs or music from YouTube",
         "ability": "play music from YouTube",
         "examples": MUSIC_EXAMPLES,
-        "fast": _music_fast,
     },
 }
 
@@ -425,7 +411,6 @@ def router_prompt():
                 negatives.append(user)
     for user in negatives[:ROUTER_NEGATIVES]:
         lines.append(f'"{user}" -> NONE')
-    lines.append('"Play some music." -> UNSUPPORTED')
     lines.append('"Set a timer for ten minutes." -> UNSUPPORTED')
     lines.append('"Uh the cat purple the and." -> UNCLEAR')
     lines.append("Answer with the one word only.")
@@ -446,6 +431,15 @@ def group_prompt(group):
             1,
             "When your reply includes a light action tag, describe the action "
             "as already completed, because it will run before your reply is spoken.",
+        )
+    elif group == "MUSIC":
+        lines.insert(
+            1,
+            "Use the recent conversation to resolve references such as 'their "
+            "songs' or 'that band'. Make each MUSIC_PLAY query self-contained "
+            "by naming the song or artist established in context. If context "
+            "does not identify them, ask a brief clarifying question and do not "
+            "use a tag.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
@@ -476,7 +470,8 @@ def parse_route(raw):
 def fast_group(user_text):
     """Group name if a strict matcher recognises the request, else None."""
     for name, g in GROUPS.items():
-        if g["fast"](user_text):
+        matcher = g.get("fast")
+        if matcher and matcher(user_text):
             return name
     return None
 
@@ -487,7 +482,10 @@ def fast_action(user_text):
     The caller runs the tags and speaks the reply; the LLM is never involved.
     """
     for g in GROUPS.values():
-        tags = g["fast"](user_text)
+        matcher = g.get("fast")
+        if not matcher:
+            continue
+        tags = matcher(user_text)
         if tags:
             tag, arg = tags[0]
             if tag == "LIGHT_LEVEL":
@@ -504,7 +502,10 @@ def fast_action(user_text):
 def fallback(user_text):
     """Safety net when the model forgot the tag. Returns [(tag, arg)]."""
     for g in GROUPS.values():
-        found = g["fast"](user_text)
+        matcher = g.get("fast")
+        if not matcher:
+            continue
+        found = matcher(user_text)
         if found:
             return found
     return []

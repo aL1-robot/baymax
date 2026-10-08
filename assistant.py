@@ -891,16 +891,27 @@ def search_web(query):
     return results
 
 
-def route(user_text, args):
+def route(user_text, args, history=None):
     """Stage 1: which skill group (or UNSUPPORTED / UNCLEAR / NONE)?"""
     fast = skills.fast_group(user_text)
     if fast:
         log("ROUTE", f"{fast} (obvious command, router skipped)")
         return fast
 
+    context = []
+    for message in (history or [])[-6:]:
+        role = "Baymax" if message["role"] == "assistant" else "Person"
+        content = message["content"].replace("/no_think", "").strip()
+        context.append(f"{role}: {content[-400:]}")
+    request = user_text
+    if context:
+        request = (
+            "Recent conversation:\n" + "\n".join(context)
+            + "\nCurrent request: " + user_text
+        )
     messages = [
         {"role": "system", "content": skills.router_prompt()},
-        {"role": "user", "content": user_text + " /no_think"},
+        {"role": "user", "content": request + " /no_think"},
     ]
     try:
         data, _, dt = llm_chat(messages, args, timeout=60, max_tokens=24)
@@ -1076,7 +1087,9 @@ def converse(args, mic, thr, stt, history, turn):
             group = "UNCLEAR"
         else:
             fast = skills.fast_action(text)
-            group = "FAST" if fast else ("NONE" if web_question else route(text, args))
+            group = "FAST" if fast else (
+                "NONE" if web_question else route(text, args, history)
+            )
 
         if local_reply is not None:
             pass
