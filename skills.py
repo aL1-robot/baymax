@@ -182,11 +182,11 @@ def _convo_fast(text):
 # anyway, they are handled by the fast path.
 LIGHT_EXAMPLES = [
     ("It's too dark in here.",
-     "I will turn on the light for you. [[LIGHT_ON]]"),
+     "I turned on the light for you. [[LIGHT_ON]]"),
     ("Lights out please, I want to sleep.",
-     "Turning off the light now. Sleep well. [[LIGHT_OFF]]"),
+     "I turned off the light for you. Sleep well. [[LIGHT_OFF]]"),
     ("Set the light to 60 percent.",
-     "Setting the light to 60 percent. [[LIGHT_LEVEL:60]]"),
+     "I set the light to 60 percent. [[LIGHT_LEVEL:60]]"),
     ("What is an LED?",
      "An LED is a small light that uses very little power."),
     ("I have a headache.",
@@ -246,13 +246,13 @@ ROUTER_NEGATIVES = 4
 # fast matcher can return needs an entry here. {arg} is filled in for tags
 # that take an argument.
 FAST_REPLIES = {
-    "LIGHT_ON":    ["I will turn on the light for you.", "Turning on the light.",
+    "LIGHT_ON":    ["I turned on the light for you.", "I turned on the light.",
                     "The light is on now."],
-    "LIGHT_OFF":   ["Turning off the light now.", "I will turn off the light.",
+    "LIGHT_OFF":   ["I turned off the light.", "I turned off the light for you.",
                     "The light is off now."],
-    "LIGHT_UP":    ["I will make the light brighter.", "Making the light brighter."],
-    "LIGHT_DOWN":  ["Making the light softer for you.", "I will dim the light."],
-    "LIGHT_LEVEL": ["Setting the light to {arg} percent."],
+    "LIGHT_UP":    ["I made the light brighter.", "I brightened the light."],
+    "LIGHT_DOWN":  ["I made the light softer for you.", "I dimmed the light."],
+    "LIGHT_LEVEL": ["I set the light to {arg} percent."],
     "END_CONVERSATION": ["Okay. I will be here if you need me.",
                          "Goodbye. I am glad I could help.",
                          "Going quiet now. Say my name when you need me."],
@@ -319,6 +319,12 @@ def group_prompt(group):
         "for that action. Otherwise write no tag at all.",
         "Tags:",
     ]
+    if group == "LIGHT":
+        lines.insert(
+            1,
+            "When your reply includes a light action tag, describe the action "
+            "as already completed, because it will run before your reply is spoken.",
+        )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
             shown = f"[[{tag}:{arg}]]" if arg else f"[[{tag}]]"
