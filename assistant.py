@@ -979,7 +979,7 @@ def run_tags(tags, args):
     for tag, arg in tags:
         name = f"{tag}:{arg}" if arg else tag
         if tag == "MUSIC_PLAY":
-            request = arg or "some music"
+            request = (arg or "some music").strip().rstrip(".,!?;:") or "some music"
             speak(f"I'll look for {request} and start playing it now.", args)
         ok, msg = skills.run(tag, arg)
         log("SKILL", f"{name} -> {msg}" if ok else f"{name} FAILED - {msg}")

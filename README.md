@@ -128,8 +128,8 @@ python assistant.py --ptt
 Ask Baymax to play music or a named track, for example, “Play some music” or
 “Play Here Comes the Sun by the Beatles.” Baymax searches the YouTube Music
 song catalogue and plays a song result through `mpv`, rather than taking the
-first general YouTube video result. Baymax says it will look for the request
-before starting the search. `yt-dlp` resolves the selected YouTube Music
+first general YouTube video result. Baymax says it will look for the requested
+song before starting the search. `yt-dlp` resolves the selected YouTube Music
 track's audio stream URL, so `mpv` does not need its own YouTube download
 helper. Playback runs to
 completion before Baymax listens for another request. Baymax cannot hear a
