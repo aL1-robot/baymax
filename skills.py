@@ -241,14 +241,16 @@ def music_query_for_request(text, history=()):
 
 
 def music_needs_recommendation(text, history=()):
-    """Whether a play request describes preferences instead of a known track."""
+    """Whether a request needs web research to pick a concrete song."""
     if not music_request_intent(text, history):
         return False
     query = music_query_for_request(text, history)
     if query is None:
         return False
     terms = _music_query_terms(query)
-    return not terms or terms <= _MUSIC_PREFERENCE_TERMS
+    # A request for anything can go straight to YouTube Music's song catalogue.
+    # Web search is useful only when the person gave a preference to research.
+    return bool(terms) and terms <= _MUSIC_PREFERENCE_TERMS
 
 
 def _music_title_matches(query, title, artists=()):
