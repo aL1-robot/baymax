@@ -92,6 +92,9 @@ enabled, utterances are saved under `~/baymax_wavs`.
 - Factual questions try your local SearXNG first, then DuckDuckGo and
   Wikipedia as fallbacks. Baymax gives sourced results to the local LLM to
   summarize and includes the search engine in its spoken attribution.
+- A lightweight LLM router also recognizes knowledge questions phrased without
+  search keywords and sends those to web search, while keeping ordinary
+  conversation on the chat path.
 
 These lookups require an internet connection. The spoken question is sent to
 your SearXNG instance first; only if it is unavailable or returns no usable
@@ -136,7 +139,9 @@ Music requests use the recent conversation as context, so follow-ups such as
 “play one of their songs” can refer to an artist discussed earlier. Baymax
 checks YouTube result titles against the requested artist/song before playback;
 if no result matches, it reports that instead of playing the first unrelated
-result.
+result. If you ask for a kind of song or artist without naming a specific
+track, Baymax searches the web for a concrete song recommendation first and
+only plays a title supported by those results.
 
 If YouTube extraction stops working, update yt-dlp using the same Python
 environment that runs Baymax:

@@ -144,6 +144,11 @@ _MUSIC_GENERIC_QUERIES = {
     "any song", "any music", "anything", "something", "some music", "music",
     "a song", "popular music", "any song please", "anything please",
 }
+_MUSIC_PREFERENCE_TERMS = {
+    "a", "any", "artist", "band", "filipino", "indonesian", "japanese",
+    "korean", "popular", "random", "singer", "song", "some", "something",
+    "thai", "track", "trending",
+}
 _MUSIC_CONFIRMATIONS = re.compile(
     r"^\s*(?:yes|yeah|yep|sure|okay|ok|go ahead|sounds good|do that)[.! ]*$",
     re.I,
@@ -224,7 +229,7 @@ def music_query_for_request(text, history=()):
     query = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?'\"")
     query = re.sub(r"^(?:(?:me|some|any|a|the)\s+)+", "", query, flags=re.I)
     query = re.sub(r"^(?:song|music|track)\s+", "", query, flags=re.I).strip()
-    if not query or not _music_query_terms(query):
+    if not query:
         return "popular music"
     if query.lower() in _MUSIC_GENERIC_QUERIES:
         return "popular music"
@@ -233,12 +238,37 @@ def music_query_for_request(text, history=()):
     return query[:160]
 
 
+def music_needs_recommendation(text, history=()):
+    """Whether a play request describes preferences instead of a known track."""
+    if not music_request_intent(text, history):
+        return False
+    query = music_query_for_request(text, history)
+    if query is None:
+        return False
+    terms = _music_query_terms(query)
+    return not terms or terms <= _MUSIC_PREFERENCE_TERMS
+
+
 def _music_title_matches(query, title):
     terms = _music_query_terms(query)
     if not terms:
         return True
     title_tokens = set(_music_title_tokens(title))
     return terms <= title_tokens
+
+
+def music_result_supports_query(query, results):
+    """Require one search result to contain all meaningful song/artist terms."""
+    terms = _music_query_terms(query)
+    if not terms or terms <= _MUSIC_PREFERENCE_TERMS:
+        return False
+    for result in results:
+        source_terms = set(_music_title_tokens(
+            f"{result.get('title', '')} {result.get('snippet', '')}"
+        ))
+        if terms <= source_terms:
+            return True
+    return False
 
 
 def play_youtube_music(query):
@@ -455,7 +485,7 @@ GROUPS = {
 }
 
 # Router answers that are not skill groups.
-ROUTES = ("NONE", "UNSUPPORTED", "UNCLEAR")
+ROUTES = ("NONE", "WEB", "UNSUPPORTED", "UNCLEAR")
 
 # tag -> (group, description shown to the LLM, function, argument hint or None)
 SKILLS = {
@@ -516,13 +546,17 @@ def router_prompt():
     lines = [
         "Decide which ability the person's request needs. Answer with exactly "
         "one word from this list:",
-        "NONE - ordinary chat, questions, feelings, anything else",
+        "NONE - conversation, personal feelings, preferences, opinions, or "
+        "questions about the current chat; no external facts needed",
+        "WEB - the person wants factual information, identification, an "
+        "explanation, recommendations, or other information that should be "
+        "checked against outside sources. Use WEB even if they do not say "
+        "'search' or 'look it up'.",
     ]
     for name, g in GROUPS.items():
         lines.append(f"{name} - {g['about']}")
     lines.append("UNSUPPORTED - asks you to DO something that is not in the "
-                 "list above (set a timer, send a message, open a "
-                 "door). Questions and advice are NONE, not UNSUPPORTED")
+                 "list above (set a timer, send a message, open a door).")
     lines.append("UNCLEAR - garbled, cut off, or not a real sentence")
     lines.append("Examples:")
     negatives = []
@@ -537,6 +571,9 @@ def router_prompt():
                 negatives.append(user)
     for user in negatives[:ROUTER_NEGATIVES]:
         lines.append(f'"{user}" -> NONE')
+    lines.append('"Do you know the Filipino singer named Adi?" -> WEB')
+    lines.append('"Tell me why the sky looks blue." -> WEB')
+    lines.append('"I had a long day." -> NONE')
     lines.append('"Set a timer for ten minutes." -> UNSUPPORTED')
     lines.append('"Uh the cat purple the and." -> UNCLEAR')
     lines.append("Answer with the one word only.")
