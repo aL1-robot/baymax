@@ -1,7 +1,7 @@
 import json, urllib.request
 
 URL = "http://localhost:8080/v1/chat/completions"
-MODEL = "qwen3-1.7b"
+MODEL = "qwen3.5-2b"
 SYSTEM = ("You are Baymax, a gentle, caring inflatable healthcare companion robot "
           "from Big Hero 6. Speak in short, calm, simple sentences. Be literal, sincere "
           "and patient. Introduce yourself as a personal healthcare companion. Ask how "

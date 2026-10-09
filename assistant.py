@@ -1287,7 +1287,7 @@ def main():
                    help="override wake word probability cutoff")
     p.add_argument("--threshold", type=float, default=None,
                    help="speech loudness threshold (default: auto-calibrated)")
-    p.add_argument("--model", default="qwen3-1.7b", help="rkllama model name")
+    p.add_argument("--model", default="qwen3.5-2b", help="rkllama model name")
     p.add_argument("--llm-url", default="http://localhost:8080/v1/chat/completions")
     p.add_argument("--searxng-url", default="http://localhost:8082/search",
                    help="SearXNG search endpoint (default: http://localhost:8082/search)")
