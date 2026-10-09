@@ -569,7 +569,7 @@ def wait_for_wake(mic, mww, frontend, heartbeat):
 
 
 # ---------------------------------------------------------------- recording
-def record_utterance(mic, thr, max_wait=6.0, max_len=15.0, end_silence=0.7):
+def record_utterance(mic, thr, max_wait=6.0, max_len=15.0, end_silence=1.0):
     """Wait for speech to start, record until it stops. Returns bytes or None.
 
     Short noise blips (clicks, pops, creaks) are discarded: a recording only
@@ -663,7 +663,7 @@ def transcribe(model, pcm_bytes):
     log("STT", "transcribing...")
     t0 = time.monotonic()
     segments, info = model.transcribe(
-        audio, language="en", beam_size=1,
+        audio, language="en", beam_size=5,
         condition_on_previous_text=False,
         vad_filter=True,   # drops non-speech audio, kills most "You" hallucinations
         vad_parameters=dict(min_silence_duration_ms=500),
@@ -1293,7 +1293,7 @@ def main():
     log("INIT", "loading speech-to-text model...")
     t0 = time.monotonic()
     stt = WhisperModel(str(whisper_dir), device="cpu",
-                       compute_type="int8", cpu_threads=4)
+                       compute_type="int8", cpu_threads=6)
     vlog("INIT", f"Whisper from {whisper_dir} loaded in {time.monotonic() - t0:.1f}s")
 
     mic = Mic(args.alsa)
