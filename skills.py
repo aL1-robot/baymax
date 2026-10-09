@@ -135,10 +135,11 @@ def end_conversation():
 
 
 _MUSIC_QUERY_FILLERS = {
-    "a", "about", "anything", "any", "band", "by", "for", "music",
-    "of", "on", "one", "play", "please", "popular", "put", "song", "some",
-    "something",
-    "the", "their", "track", "with",
+    "a", "about", "and", "anything", "any", "band", "by", "can", "featuring",
+    "feat", "for", "from", "i", "like", "listen", "me", "music", "of",
+    "on", "one", "play", "please", "popular", "put", "s", "singer", "sing",
+    "song", "some", "something", "the", "their", "to", "track", "with",
+    "you",
 }
 _MUSIC_GENERIC_QUERIES = {
     "any song", "any music", "anything", "something", "some music", "music",
@@ -156,6 +157,7 @@ _MUSIC_CONFIRMATIONS = re.compile(
 
 
 def _music_title_tokens(text):
+    text = re.sub(r"(?<=\w)['’]s\b", "", text)
     normalized = unicodedata.normalize("NFKD", text).encode(
         "ascii", "ignore"
     ).decode("ascii").lower()
@@ -249,12 +251,31 @@ def music_needs_recommendation(text, history=()):
     return not terms or terms <= _MUSIC_PREFERENCE_TERMS
 
 
-def _music_title_matches(query, title):
-    terms = _music_query_terms(query)
-    if not terms:
+def _music_title_matches(query, title, artists=()):
+    query_terms = _music_query_terms(query)
+    if not query_terms:
         return True
+
+    def matches(requested, candidates):
+        return any(
+            candidate == requested
+            or (
+                min(len(candidate), len(requested)) >= 3
+                and abs(len(candidate) - len(requested)) <= 1
+                and (candidate.startswith(requested) or requested.startswith(candidate))
+            )
+            for candidate in candidates
+        )
+
     title_tokens = set(_music_title_tokens(title))
-    return terms <= title_tokens
+    artist_tokens = set(_music_title_tokens(" ".join(artists)))
+    # Require the song name itself to be present; remaining request words may
+    # match an artist, allowing variants such as "Mahika from Adi" or "Adi's
+    # song Mahika" without accepting a different song by the same artist.
+    return (
+        any(matches(term, title_tokens) for term in query_terms)
+        and all(matches(term, title_tokens | artist_tokens) for term in query_terms)
+    )
 
 
 def music_result_supports_query(query, results):
@@ -304,8 +325,7 @@ def play_youtube_music(query):
         ]
         if not video_id or not title or video_id in seen_ids:
             continue
-        full_title = " - ".join([title, *[name for name in artist_names if name]])
-        if not _music_title_matches(query, full_title):
+        if not _music_title_matches(query, title, artist_names):
             continue
         seen_ids.add(video_id)
         candidates.append({
