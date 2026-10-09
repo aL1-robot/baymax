@@ -8,7 +8,7 @@ Flow:
     "that's all" / "stop listening" -> back to waiting for the wake word.
 
 Each turn inside a conversation:
-    record until you stop talking -> faster-whisper (CPU, VAD filtered)
+    record until you stop talking -> faster-whisper (CPU)
     -> junk transcript ("You", "Thank you", ...)? ignore it silently, keep listening
     -> if Whisper wasn't confident: Baymax asks you to repeat (no LLM call)
     -> router (tiny LLM call: which skill group, UNSUPPORTED, UNCLEAR, or NONE?)
@@ -577,7 +577,7 @@ def record_utterance(mic, thr, max_wait=6.0, max_len=15.0, end_silence=1.0):
     we go back to waiting, and the max_wait clock keeps running.
     """
     recent = deque(maxlen=20)      # ~200 ms smoothing of loudness
-    preroll = deque(maxlen=30)     # keep ~300 ms before speech starts
+    preroll = deque(maxlen=50)     # keep ~500 ms before speech starts
     frames = []
     started = False
     waited = 0
@@ -665,8 +665,9 @@ def transcribe(model, pcm_bytes):
     segments, info = model.transcribe(
         audio, language="en", beam_size=5,
         condition_on_previous_text=False,
-        vad_filter=True,   # drops non-speech audio, kills most "You" hallucinations
-        vad_parameters=dict(min_silence_duration_ms=500),
+        # record_utterance already detects speech boundaries; Whisper's VAD can
+        # otherwise trim a quiet or softly spoken first word.
+        vad_filter=False,
     )
     vlog("STT", f"language={info.language} (p={info.language_probability:.2f})")
     parts, lps, nsp = [], [], []
