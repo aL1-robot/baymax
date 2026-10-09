@@ -272,7 +272,7 @@ def music_result_supports_query(query, results):
 
 
 def play_youtube_music(query):
-    """Search YouTube and play one audio result to completion with mpv."""
+    """Find a song in YouTube Music and play its audio with mpv."""
     player = shutil.which("mpv")
     if not player:
         raise FileNotFoundError("mpv is not installed; install it with your system package manager")
@@ -280,84 +280,103 @@ def play_youtube_music(query):
         import yt_dlp
     except ImportError as error:
         raise RuntimeError("yt-dlp is not installed; install the project requirements") from error
+    try:
+        from ytmusicapi import YTMusic
+    except ImportError as error:
+        raise RuntimeError(
+            "ytmusicapi is not installed; update requirements and install the project dependencies"
+        ) from error
 
-    version = getattr(getattr(yt_dlp, "version", None), "__version__", "unknown")
-    player_attempts = (
-        (["default", "web_embedded", "-tv_downgraded"], 5),
-        (["web_safari", "web_embedded", "-tv_downgraded"], 5),
-    )
-    playable = []
-    last_error = None
-    extraction_errors = []
-    for clients, result_limit in player_attempts:
-        attempt_errors = []
-
-        class QuietYtDlpLogger:
-            def debug(self, message):
-                pass
-
-            def warning(self, message):
-                pass
-
-            def error(self, message):
-                attempt_errors.append(str(message))
-
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "ignoreerrors": True,
-            "format": "bestaudio/best",
-            "extractor_args": {"youtube": {"player_client": clients}},
-            "logger": QuietYtDlpLogger(),
-        }
-        try:
-            with yt_dlp.YoutubeDL(options) as downloader:
-                result = downloader.extract_info(
-                    f"ytsearch{result_limit}:{query}", download=False
-                )
-        except yt_dlp.utils.DownloadError as error:
-            last_error = error
-            extraction_errors.extend(attempt_errors)
+    matches = YTMusic().search(query, filter="songs", limit=10)
+    candidates = []
+    seen_ids = set()
+    for match in matches:
+        if (not isinstance(match, dict)
+                or match.get("resultType") != "song"
+                or match.get("isAvailable") is False):
             continue
+        video_id = match.get("videoId")
+        title = str(match.get("title") or "").strip()
+        artists = match.get("artists") or []
+        artist_names = [
+            str(artist.get("name") or "").strip()
+            for artist in artists if isinstance(artist, dict)
+        ]
+        if not video_id or not title or video_id in seen_ids:
+            continue
+        full_title = " - ".join([title, *[name for name in artist_names if name]])
+        if not _music_title_matches(query, full_title):
+            continue
+        seen_ids.add(video_id)
+        candidates.append({
+            "video_id": video_id,
+            "title": title,
+            "artists": artist_names,
+        })
 
-        entries = result.get("entries") if result else None
-        playable.extend(
-            entry for entry in entries or []
-            if entry and entry.get("url") and entry.get("title")
-        )
-        extraction_errors.extend(attempt_errors)
-        if playable:
-            matching = next(
-                (entry for entry in playable
-                 if _music_title_matches(query, entry["title"])),
-                None,
-            )
-            if matching:
-                playable = [matching]
-                break
-
-    if playable and not _music_title_matches(query, playable[0]["title"]):
+    if not candidates:
         raise LookupError(
-            f"No YouTube title matched {query!r}. I did not play a different "
-            "result. Please repeat the artist or song title."
+            f"YouTube Music found no song matching {query!r}. "
+            "Please repeat the song or artist name."
         )
-    if not playable:
-        detail = " ".join(dict.fromkeys(extraction_errors))
+
+    player_attempts = (
+        ["default", "web_embedded", "-tv_downgraded"],
+        ["web_safari", "web_embedded", "-tv_downgraded"],
+    )
+    extraction_errors = []
+
+    class QuietYtDlpLogger:
+        def debug(self, message):
+            pass
+
+        def warning(self, message):
+            pass
+
+        def error(self, message):
+            extraction_errors.append(str(message))
+
+    last_error = None
+    selected = None
+    for candidate in candidates:
+        music_url = f"https://music.youtube.com/watch?v={candidate['video_id']}"
+        for clients in player_attempts:
+            options = {
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "format": "bestaudio/best",
+                "extractor_args": {"youtube": {"player_client": clients}},
+                "logger": QuietYtDlpLogger(),
+            }
+            try:
+                with yt_dlp.YoutubeDL(options) as downloader:
+                    entry = downloader.extract_info(music_url, download=False)
+            except yt_dlp.utils.DownloadError as error:
+                last_error = error
+                continue
+            if entry and entry.get("url"):
+                selected = (candidate, entry["url"])
+                break
+        if selected:
+            break
+
+    if not selected:
+        details = " ".join(dict.fromkeys(extraction_errors))
         error = RuntimeError(
-            f"No playable YouTube result with yt-dlp {version}. Update yt-dlp "
-            "in the assistant's Python environment with: "
-            "python -m pip install --upgrade yt-dlp"
-            + (f". Extractor details: {detail}" if detail else "")
+            "YouTube Music found matching songs, but yt-dlp could not resolve "
+            "an audio stream."
+            + (f" Extractor details: {details}" if details else "")
         )
         if last_error:
             raise error from last_error
         raise error
-    entry = playable[0]
-    audio_url = entry["url"]
 
-    title = entry.get("title") or query
-    print(f"  Playing from YouTube: {title}", flush=True)
+    candidate, audio_url = selected
+    title = " - ".join(
+        [candidate["title"], *[name for name in candidate["artists"] if name]]
+    )
+    print(f"  Playing from YouTube Music: {title}", flush=True)
     played = subprocess.run(
         [player, "--no-video", "--no-terminal", "--really-quiet", audio_url],
         stdout=subprocess.DEVNULL,
@@ -478,8 +497,8 @@ GROUPS = {
         "fast": _convo_fast,
     },
     "MUSIC": {
-        "about": "play requested songs or music from YouTube",
-        "ability": "play music from YouTube",
+        "about": "play requested songs or music from YouTube Music",
+        "ability": "play music from YouTube Music",
         "examples": MUSIC_EXAMPLES,
     },
 }
@@ -498,7 +517,7 @@ SKILLS = {
     "END_CONVERSATION": ("CONVERSATION",
                          "end the conversation; you will go idle until the "
                          "next wake word",                        end_conversation, None),
-    "MUSIC_PLAY": ("MUSIC", "search for and play a song or music on YouTube",
+    "MUSIC_PLAY": ("MUSIC", "find a song in YouTube Music and play its audio",
                    play_youtube_music, "QUERY"),
 }
 

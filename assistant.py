@@ -989,10 +989,12 @@ def run_tags(tags, args):
 def music_failure_reply(error):
     """Give a useful spoken hint for the common YouTube extractor failure."""
     message = error.lower()
+    if "ytmusicapi" in message:
+        return "I couldn't search YouTube Music. Please install the project requirements and try again."
     if "yt-dlp" in message or "youtube extractor" in message:
-        return "I couldn't get audio from YouTube. Please update yt-dlp and try again."
-    if "no youtube title matched" in message:
-        return "I couldn't find a YouTube result matching that artist or song, so I did not play a different track. Please say the title again."
+        return "I couldn't get audio from YouTube Music. Please update yt-dlp and try again."
+    if "youtube music found no song" in message or "no youtube title matched" in message:
+        return "I couldn't find that song in YouTube Music, so I did not play a different track. Please say the title again."
     return "I couldn't play music just now. Please check the internet connection and music player."
 
 

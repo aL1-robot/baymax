@@ -7,7 +7,7 @@ A local voice assistant for ARM devices like the Orange Pi 5. It combines a wake
 - Wake-word detection with a local on-device model
 - Speech-to-text using Faster Whisper
 - Text-to-speech via Piper
-- Free YouTube audio playback using yt-dlp and mpv
+- YouTube Music song search and audio playback using ytmusicapi, yt-dlp, and mpv
 - Local-time answers, online dictionary definitions, and free web search
 - Local model storage under `~/models`
 - Works well on Ubuntu/Debian-based ARM systems
@@ -126,10 +126,12 @@ python assistant.py --ptt
 ```
 
 Ask Baymax to play music or a named track, for example, “Play some music” or
-“Play Here Comes the Sun by the Beatles.” Baymax searches YouTube and plays the
-first audio result through `mpv`. Baymax says it will look for the request
-before starting the YouTube search. `yt-dlp` resolves the audio stream URL, so
-`mpv` does not need its own YouTube download helper. Playback runs to
+“Play Here Comes the Sun by the Beatles.” Baymax searches the YouTube Music
+song catalogue and plays a song result through `mpv`, rather than taking the
+first general YouTube video result. Baymax says it will look for the request
+before starting the search. `yt-dlp` resolves the selected YouTube Music
+track's audio stream URL, so `mpv` does not need its own YouTube download
+helper. Playback runs to
 completion before Baymax listens for another request. Baymax cannot hear a
 voice command to stop the track while it is playing. Playback errors are
 reported after the player exits. This uses free, unofficial YouTube search and
@@ -137,26 +139,26 @@ playback, requires an internet connection, and may be affected by YouTube or
 yt-dlp changes.
 Music requests use the recent conversation as context, so follow-ups such as
 “play one of their songs” can refer to an artist discussed earlier. Baymax
-checks YouTube result titles against the requested artist/song before playback;
+checks YouTube Music song titles and artists against the requested artist/song
+before playback;
 if no result matches, it reports that instead of playing the first unrelated
 result. If you ask for a kind of song or artist without naming a specific
 track, Baymax searches the web for a concrete song recommendation first and
 only plays a title supported by those results.
 
-If YouTube extraction stops working, update yt-dlp using the same Python
+YouTube Music search uses the public, unauthenticated `ytmusicapi` interface;
+install it with the project's requirements. Audio extraction still uses
+yt-dlp. If extraction stops working, update yt-dlp using the same Python
 environment that runs Baymax:
 
 ```bash
 python -m pip install --upgrade yt-dlp
 ```
 
-Baymax first tries the `default` and `web_embedded` clients with up to five
-search results, then retries `web_safari` and `web_embedded` with up to five
-results if needed. Both strategies exclude the problematic `tv_downgraded`
-client. This puts the client that worked on your device first and avoids
-waiting for several known-bad results before playback starts. Errors from a
-failed strategy stay quiet if the fallback succeeds. mpv's playback progress is
-also hidden.
+For stream extraction Baymax first tries the `default` and `web_embedded`
+clients, then retries `web_safari` and `web_embedded` if needed. Both strategies
+exclude the problematic `tv_downgraded` client. Errors from a failed strategy
+stay quiet if the fallback succeeds. mpv's playback progress is also hidden.
 
 The Python 3.10 deprecation warning is from yt-dlp and does not stop playback.
 Upgrade to Python 3.11 or newer when convenient to remove the warning and stay
