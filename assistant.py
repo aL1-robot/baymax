@@ -116,6 +116,12 @@ IDLE_DEAF_CHUNKS = 150  # after a conversation ends, ignore ~1.5 s of audio (10 
 VERBOSE = False
 VOICE_CACHE = {}
 WAKE_REPLIES = ["Yes?", "I'm here.", "Go ahead.", "I'm listening.", "How can I help?", "Yes, what is it?"]
+WEB_SEARCH_REPLIES = [
+    "Let me look that up.",
+    "I'll search for that now.",
+    "Let me check a few sources.",
+    "I'll find out for you.",
+]
 TTS_LEADING_SILENCE_SECONDS = 0.3
 TTS_CACHE_VERSION = 2
 
@@ -306,7 +312,8 @@ def initialize_voice_cache(args):
     ).hexdigest()[:12]
     phrases = sorted({
         clean_for_speech(reply)
-        for replies in [*skills.FAST_REPLIES.values(), WAKE_REPLIES]
+        for replies in [*skills.FAST_REPLIES.values(), WAKE_REPLIES,
+                        WEB_SEARCH_REPLIES]
         for reply in replies
         if "{" not in reply and clean_for_speech(reply)
     })
@@ -1185,6 +1192,9 @@ def converse(args, mic, thr, stt, history, turn):
             misses = 0
             if web_question:
                 log("WEB", "searching free web sources...")
+                web_acknowledgement = random.choice(WEB_SEARCH_REPLIES)
+                print(f"\n  Baymax: {web_acknowledgement}\n", flush=True)
+                speak(web_acknowledgement, args)
                 web_results = search_web(
                     text, getattr(
                         args, "searxng_url", "http://localhost:8082/search"
