@@ -89,15 +89,26 @@ enabled, utterances are saved under `~/baymax_wavs`.
 
 - Time questions use the Orange Pi's local clock and configured timezone.
 - Word definitions use the free DictionaryAPI.dev endpoint.
-- Factual questions use DuckDuckGo's no-key HTML search and Wikipedia's
-  no-key MediaWiki API. Baymax gives the results to the local LLM to summarize
-  and prints the source links.
+- Factual questions try your local SearXNG first, then DuckDuckGo and
+  Wikipedia as fallbacks. Baymax gives sourced results to the local LLM to
+  summarize and includes the search engine in its spoken attribution.
 
 These lookups require an internet connection. The spoken question is sent to
-the relevant public service; do not ask Baymax to search for private
-information. Free services can be unavailable or limit requests, and web
-results may be incomplete. Baymax will say when a search returns no useful
-results rather than making up an answer.
+your SearXNG instance first; only if it is unavailable or returns no usable
+results will the query be sent to DuckDuckGo or Wikipedia. Do not ask Baymax to
+search for private information. Search services can be unavailable or limit
+requests, and web results may be incomplete. Baymax will say when a search
+returns no useful results rather than making up an answer.
+
+By default, Baymax uses `http://localhost:8082/search` and requests SearXNG's
+JSON output. Set another endpoint if needed:
+
+```bash
+python assistant.py --searxng-url http://localhost:8082/search
+```
+
+Web answers are attributed aloud, for example, “According to Wikipedia, ...”
+or “According to google, ...”, using the engine name in the selected result.
 
 Verbose mode for troubleshooting:
 
