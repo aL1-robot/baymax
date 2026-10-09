@@ -69,7 +69,7 @@ import skills
 # ---------------------------------------------------------------- hardcoded
 SCRIPT_DIR = Path(__file__).resolve().parent
 HOME = Path.home()
-WHISPER_DIR = HOME / "models" / "faster-whisper-small.en"
+WHISPER_DIR = HOME / "models" / "faster-whisper-base.en"
 WAKE_CONFIG = SCRIPT_DIR / "hey_baymax.json"
 
 # The rkllama CLI ignores the Modelfile SYSTEM line, so the persona lives here.
