@@ -429,17 +429,23 @@ def abilities():
 def router_prompt():
     """Stage 1: the tiny index prompt. Names and descriptions only."""
     lines = [
-        "Decide which ability the person's request needs. Answer with exactly "
-        "one word from this list:",
-        "NONE - conversation, personal feelings, preferences, opinions, or "
-        "questions about the current chat; no external facts needed",
+        "Decide which ability the person's request needs. First check whether "
+        "they want you to perform one of the listed abilities. If so, choose "
+        "that ability, even when the request is casual or phrased as a "
+        "question. Only choose NONE when no listed action or outside "
+        "information is requested. Answer with exactly one word from this list:",
+    ]
+    for name, g in GROUPS.items():
+        lines.append(f"{name} - {g['about']}")
+    lines.extend([
         "WEB - the person wants factual information, identification, an "
         "explanation, recommendations, or other information that should be "
         "checked against outside sources. Use WEB even if they do not say "
         "'search' or 'look it up'.",
-    ]
-    for name, g in GROUPS.items():
-        lines.append(f"{name} - {g['about']}")
+        "NONE - ordinary conversation, personal feelings, or opinions that "
+        "need no action and no outside facts. A request to perform a listed "
+        "ability is never NONE.",
+    ])
     lines.append("UNSUPPORTED - asks you to DO something that is not in the "
                  "list above (set a timer, send a message, open a door).")
     lines.append("UNCLEAR - garbled, cut off, or not a real sentence")
