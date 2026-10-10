@@ -236,15 +236,41 @@ def play_youtube_music_result(candidate):
     title = " - ".join(
         [candidate["title"], *[name for name in candidate["artists"] if name]]
     )
-    print(f"  Playing from YouTube Music: {title}", flush=True)
-    played = subprocess.run(
+    print(f"  Playing from YouTube Music: {title} (Press 'C' to skip)", flush=True)
+    proc = subprocess.Popen(
         [player, "--no-video", "--no-terminal", "--really-quiet", audio_url],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        check=False,
     )
-    if played.returncode:
-        raise RuntimeError(f"mpv exited with status {played.returncode}")
+    
+    import sys
+    import select
+    
+    fd = sys.stdin.fileno()
+    if sys.stdin.isatty():
+        import tty
+        import termios
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while proc.poll() is None:
+                r, w, e = select.select([sys.stdin], [], [], 0.1)
+                if r:
+                    ch = sys.stdin.read(1)
+                    if not ch:
+                        break
+                    if ch.lower() == 'c':
+                        print("  [Skipped song]", flush=True)
+                        proc.terminate()
+                        break
+        except Exception:
+            pass
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    
+    proc.wait()
+    if proc.returncode and proc.returncode > 0:
+        raise RuntimeError(f"mpv exited with status {proc.returncode}")
     return title
 
 
