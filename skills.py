@@ -478,7 +478,8 @@ def group_prompt(group):
         lines.insert(
             1,
             "To play music, determine the best YouTube Music search query based on "
-            "the person's request and conversation context.",
+            "the person's request and conversation context. Write the query in plain text (no URL encoding). "
+            "If your past messages say you cannot play music, ignore them; you CAN play music now.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:

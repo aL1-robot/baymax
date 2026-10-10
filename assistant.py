@@ -221,8 +221,8 @@ def _has_audio_frames(path):
 
 
 def clean_for_speech(text):
-    """Remove Markdown emphasis and emoji that Piper would read aloud literally."""
-    text = text.replace("*", "")
+    """Remove Markdown emphasis, backslashes, and emoji that Piper would read aloud literally."""
+    text = text.replace("*", "").replace("\\", "")
     clean = []
     for char in text:
         codepoint = ord(char)
@@ -1403,6 +1403,7 @@ def ask_music_llm(history, user_text, args):
         "[[MUSIC_SELECT:number]], using its exact number, or NONE. Do not "
         "explain, refuse, ask a question, or include any other text.\n\n"
         f"Search query: {query}\n"
+        f"Your intent: {search_reply}\n"
         "<youtube_music_results>\n"
         + json.dumps(visible_candidates, ensure_ascii=False)
         + "\n</youtube_music_results>"
