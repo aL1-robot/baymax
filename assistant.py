@@ -369,6 +369,7 @@ def _speak_audio(text, args):
         audio_path = Path(temporary.name) / "reply.wav"
         log("TTS", "generating speech...")
         try:
+            synthesis_started = time.monotonic()
             generated = subprocess.run(
                 [
                     piper, "--model", str(model), "--output_file", str(audio_path),
@@ -391,12 +392,15 @@ def _speak_audio(text, args):
             if not _has_audio_frames(audio_path):
                 raise RuntimeError(f"Piper created invalid audio: {audio_path}")
             _add_leading_silence(audio_path)
+            vlog("TTS", f"Piper synthesis finished in "
+                        f"{time.monotonic() - synthesis_started:.2f}s")
         except Exception:
             temporary.cleanup()
             raise
 
     log("TTS", "playing reply")
     try:
+        playback_started = time.monotonic()
         played = subprocess.run(
             [player, "-q", str(audio_path)],
             stdout=subprocess.DEVNULL,
@@ -409,6 +413,8 @@ def _speak_audio(text, args):
                 f"Audio player failed with exit code {played.returncode}"
                 + (f": {error}" if error else "")
             )
+        vlog("TTS", f"audio playback finished in "
+                    f"{time.monotonic() - playback_started:.2f}s")
     finally:
         if temporary:
             temporary.cleanup()
@@ -430,6 +436,11 @@ class SentenceSpeaker:
         self.has_spoken = False
         self.error = None
         self.closed = False
+        self.generation_finished = False
+        self.started_at = time.monotonic()
+        self.received_chunks = 0
+        self.queued_sentences = 0
+        self.started_sentences = 0
         self.audio_queue = queue.Queue()
         self.worker = threading.Thread(target=self._play, daemon=True)
         self.worker.start()
@@ -442,7 +453,24 @@ class SentenceSpeaker:
                     return
                 if self.error is None:
                     try:
+                        started = time.monotonic()
+                        self.started_sentences += 1
+                        vlog(
+                            "TTS",
+                            f"sentence {self.started_sentences} "
+                            f"started at +{started - self.started_at:.2f}s "
+                            f"({'after' if self.generation_finished else 'while'} "
+                            f"model generation) "
+                            f"(queue remaining: {self.audio_queue.qsize()}): "
+                            f"{sentence!r}",
+                        )
                         speak(sentence, self.args)
+                        vlog(
+                            "TTS",
+                            f"sentence playback complete at "
+                            f"+{time.monotonic() - self.started_at:.2f}s "
+                            f"(sentence took {time.monotonic() - started:.2f}s)",
+                        )
                     except Exception as error:
                         self.error = error
                         log("TTS", f"streamed speech failed: {error}")
@@ -457,9 +485,17 @@ class SentenceSpeaker:
             self.pending_text = self.pending_text[match.end():]
             if clean_for_speech(sentence):
                 self.has_spoken = True
+                self.queued_sentences += 1
                 self.audio_queue.put(sentence)
+                vlog(
+                    "TTS",
+                    f"sentence {self.queued_sentences} queued at "
+                    f"+{time.monotonic() - self.started_at:.2f}s "
+                    f"(queue size: {self.audio_queue.qsize()}): {sentence!r}",
+                )
 
     def feed(self, delta):
+        self.received_chunks += 1
         self.raw_text += delta
         text = self.raw_text
         think_start = text.rfind("<think>")
@@ -478,6 +514,13 @@ class SentenceSpeaker:
             raise RuntimeError("LLM stream changed text that was already sent to speech")
         new_text = text[len(self.streamable_text):]
         self.streamable_text = text
+        if new_text:
+            vlog(
+                "LLM",
+                f"stream chunk {self.received_chunks} at "
+                f"+{time.monotonic() - self.started_at:.2f}s; "
+                f"{len(text)} visible characters generated: {text[-300:]!r}",
+            )
         self._queue_complete_sentences(new_text)
 
     def finish(self, reply):
@@ -491,8 +534,21 @@ class SentenceSpeaker:
         self.pending_text = ""
         if clean_for_speech(final_sentence):
             self.has_spoken = True
+            self.queued_sentences += 1
             self.audio_queue.put(final_sentence)
+            vlog(
+                "TTS",
+                f"final sentence {self.queued_sentences} queued at "
+                f"+{time.monotonic() - self.started_at:.2f}s "
+                f"(queue size: {self.audio_queue.qsize()}): {final_sentence!r}",
+            )
         self._stop()
+        vlog(
+            "TTS",
+            f"streamed speech finished at +"
+            f"{time.monotonic() - self.started_at:.2f}s "
+            f"({self.started_sentences} sentence(s) played)",
+        )
         if self.error:
             raise self.error
 
@@ -811,9 +867,12 @@ def llm_chat_stream(messages, args, on_delta, timeout=180, max_tokens=None):
     req = urllib.request.Request(args.llm_url, body,
                                  {"Content-Type": "application/json"})
     t0 = time.monotonic()
+    vlog("LLM", "waiting for streaming response headers...")
     chunks = []
     with urllib.request.urlopen(req, timeout=timeout) as response:
         status = response.status
+        vlog("LLM", f"stream response opened (HTTP {status}) after "
+                    f"{time.monotonic() - t0:.2f}s; waiting for SSE chunks")
         for line in response:
             if not line.startswith(b"data:"):
                 continue
@@ -833,10 +892,18 @@ def llm_chat_stream(messages, args, on_delta, timeout=180, max_tokens=None):
                 continue
             if not isinstance(delta, str):
                 raise ValueError("LLM stream content delta must be text")
+            if not chunks:
+                vlog("LLM", f"first text chunk arrived at "
+                            f"{time.monotonic() - t0:.2f}s")
             chunks.append(delta)
             on_delta(delta)
     if not chunks:
         raise RuntimeError("LLM streaming response contained no text")
+    vlog(
+        "LLM",
+        f"stream ended at +{time.monotonic() - t0:.2f}s "
+        f"({len(chunks)} text chunk(s), {sum(map(len, chunks))} characters)",
+    )
     return "".join(chunks), status, time.monotonic() - t0
 
 
@@ -1293,6 +1360,7 @@ def ask_llm(history, user_text, args, group, web_results=None,
             raw, status, dt = llm_chat_stream(
                 messages, args, sentence_speaker.feed, max_tokens=150
             )
+            sentence_speaker.generation_finished = True
             data = None
         else:
             data, status, dt = llm_chat(messages, args, max_tokens=150)
