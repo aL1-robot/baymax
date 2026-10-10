@@ -426,7 +426,13 @@ def speak(text, args):
 
 
 class SentenceSpeaker:
-    """Queue complete streamed sentences for ordered speech playback."""
+    """Queue complete streamed sentences for ordered speech playback.
+
+    Uses a two-stage pipeline so synthesis and playback overlap:
+      sentence_queue → [_synthesize thread] → playback_queue → [_play thread]
+
+    While sentence N is playing, sentence N+1 can already be synthesizing.
+    """
 
     def __init__(self, args):
         self.args = args
@@ -441,41 +447,154 @@ class SentenceSpeaker:
         self.received_chunks = 0
         self.queued_sentences = 0
         self.started_sentences = 0
-        self.audio_queue = queue.Queue()
-        self.worker = threading.Thread(target=self._play, daemon=True)
-        self.worker.start()
+        # Stage 1: text sentences waiting for synthesis
+        self.sentence_queue = queue.Queue()
+        # Stage 2: synthesized (audio_path, temp_dir, sentence_index) ready
+        #           for playback
+        self.playback_queue = queue.Queue()
+        self.synth_worker = threading.Thread(
+            target=self._synthesize, daemon=True)
+        self.play_worker = threading.Thread(target=self._play, daemon=True)
+        self.synth_worker.start()
+        self.play_worker.start()
+
+    def _synthesize(self):
+        """Stage 1: synthesize text → WAV as soon as sentences arrive."""
+        sentence_index = 0
+        while True:
+            item = self.sentence_queue.get()
+            try:
+                if item is None:
+                    self.playback_queue.put(None)
+                    return
+                if self.error is not None:
+                    continue
+                sentence_index += 1
+                text = clean_for_speech(item)
+                if not text:
+                    continue
+                model, piper, _player = _audio_tools(self.args)
+                cached_path = VOICE_CACHE.get(text)
+                if cached_path and _has_audio_frames(cached_path):
+                    vlog(
+                        "TTS",
+                        f"sentence {sentence_index} using cached voice at "
+                        f"+{time.monotonic() - self.started_at:.2f}s",
+                    )
+                    self.playback_queue.put(
+                        (cached_path, None, sentence_index, item))
+                    continue
+                temporary = tempfile.TemporaryDirectory(prefix="baymax-tts-")
+                audio_path = Path(temporary.name) / "reply.wav"
+                vlog(
+                    "TTS",
+                    f"sentence {sentence_index} synthesis started at "
+                    f"+{time.monotonic() - self.started_at:.2f}s: {item!r}",
+                )
+                try:
+                    synthesis_started = time.monotonic()
+                    generated = subprocess.run(
+                        [
+                            piper, "--model", str(model),
+                            "--output_file", str(audio_path),
+                            "--length_scale", str(self.args.length_scale),
+                            "--sentence_silence",
+                            str(self.args.sentence_silence),
+                        ],
+                        input=(text + "\n").encode("utf-8"),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        check=False,
+                    )
+                    if generated.returncode:
+                        err = generated.stderr.decode(errors="replace").strip()
+                        raise RuntimeError(
+                            f"Piper failed with exit code "
+                            f"{generated.returncode}"
+                            + (f": {err}" if err else ""))
+                    if (not audio_path.is_file()
+                            or audio_path.stat().st_size == 0):
+                        raise RuntimeError(
+                            f"Piper did not create audio: {audio_path}")
+                    if not _has_audio_frames(audio_path):
+                        raise RuntimeError(
+                            f"Piper created invalid audio: {audio_path}")
+                    _add_leading_silence(audio_path)
+                    vlog(
+                        "TTS",
+                        f"sentence {sentence_index} synthesis finished in "
+                        f"{time.monotonic() - synthesis_started:.2f}s",
+                    )
+                    self.playback_queue.put(
+                        (audio_path, temporary, sentence_index, item))
+                except Exception:
+                    temporary.cleanup()
+                    raise
+            except Exception as exc:
+                self.error = exc
+                log("TTS", f"streamed synthesis failed: {exc}")
+                self.playback_queue.put(None)
+                return
+            finally:
+                self.sentence_queue.task_done()
 
     def _play(self):
+        """Stage 2: play synthesized WAVs in order."""
+        _model, _piper, player = _audio_tools(self.args)
         while True:
-            sentence = self.audio_queue.get()
+            item = self.playback_queue.get()
             try:
-                if sentence is None:
+                if item is None:
                     return
-                if self.error is None:
-                    try:
-                        started = time.monotonic()
-                        self.started_sentences += 1
-                        vlog(
-                            "TTS",
-                            f"sentence {self.started_sentences} "
-                            f"started at +{started - self.started_at:.2f}s "
-                            f"({'after' if self.generation_finished else 'while'} "
-                            f"model generation) "
-                            f"(queue remaining: {self.audio_queue.qsize()}): "
-                            f"{sentence!r}",
-                        )
-                        speak(sentence, self.args)
-                        vlog(
-                            "TTS",
-                            f"sentence playback complete at "
-                            f"+{time.monotonic() - self.started_at:.2f}s "
-                            f"(sentence took {time.monotonic() - started:.2f}s)",
-                        )
-                    except Exception as error:
-                        self.error = error
-                        log("TTS", f"streamed speech failed: {error}")
+                audio_path, temporary, sentence_index, sentence_text = item
+                if self.error is not None:
+                    continue
+                try:
+                    started = time.monotonic()
+                    self.started_sentences += 1
+                    vlog(
+                        "TTS",
+                        f"sentence {self.started_sentences} "
+                        f"started at +{started - self.started_at:.2f}s "
+                        f"({'after' if self.generation_finished else 'while'} "
+                        f"model generation) "
+                        f"(queue remaining: {self.playback_queue.qsize()}): "
+                        f"{sentence_text!r}",
+                    )
+                    log("TTS", "playing reply")
+                    playback_started = time.monotonic()
+                    played = subprocess.run(
+                        [player, "-q", str(audio_path)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        check=False,
+                    )
+                    if played.returncode:
+                        err = played.stderr.decode(errors="replace").strip()
+                        raise RuntimeError(
+                            f"Audio player failed with exit code "
+                            f"{played.returncode}"
+                            + (f": {err}" if err else ""))
+                    vlog(
+                        "TTS",
+                        f"audio playback finished in "
+                        f"{time.monotonic() - playback_started:.2f}s",
+                    )
+                    vlog(
+                        "TTS",
+                        f"sentence playback complete at "
+                        f"+{time.monotonic() - self.started_at:.2f}s "
+                        f"(sentence took "
+                        f"{time.monotonic() - started:.2f}s)",
+                    )
+                except Exception as error:
+                    self.error = error
+                    log("TTS", f"streamed playback failed: {error}")
+                finally:
+                    if temporary:
+                        temporary.cleanup()
             finally:
-                self.audio_queue.task_done()
+                self.playback_queue.task_done()
 
     def _queue_complete_sentences(self, text):
         self.pending_text += text
@@ -490,12 +609,13 @@ class SentenceSpeaker:
             if clean_for_speech(sentence):
                 self.has_spoken = True
                 self.queued_sentences += 1
-                self.audio_queue.put(sentence)
+                self.sentence_queue.put(sentence)
                 vlog(
                     "TTS",
                     f"sentence {self.queued_sentences} queued at "
                     f"+{time.monotonic() - self.started_at:.2f}s "
-                    f"(queue size: {self.audio_queue.qsize()}): {sentence!r}",
+                    f"(queue size: {self.sentence_queue.qsize()}): "
+                    f"{sentence!r}",
                 )
 
     def feed(self, delta):
@@ -539,12 +659,13 @@ class SentenceSpeaker:
         if clean_for_speech(final_sentence):
             self.has_spoken = True
             self.queued_sentences += 1
-            self.audio_queue.put(final_sentence)
+            self.sentence_queue.put(final_sentence)
             vlog(
                 "TTS",
                 f"final sentence {self.queued_sentences} queued at "
                 f"+{time.monotonic() - self.started_at:.2f}s "
-                f"(queue size: {self.audio_queue.qsize()}): {final_sentence!r}",
+                f"(queue size: {self.sentence_queue.qsize()}): "
+                f"{final_sentence!r}",
             )
         self._stop()
         vlog(
@@ -563,9 +684,11 @@ class SentenceSpeaker:
         self._stop()
 
     def _stop(self):
-        self.audio_queue.put(None)
-        self.audio_queue.join()
-        self.worker.join()
+        self.sentence_queue.put(None)
+        self.sentence_queue.join()
+        self.synth_worker.join()
+        self.playback_queue.join()
+        self.play_worker.join()
         self.closed = True
 
 
