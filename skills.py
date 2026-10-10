@@ -329,19 +329,9 @@ CONVO_EXAMPLES = [
      "I am functioning well. How are you feeling?"),
 ]
 
-MUSIC_EXAMPLES = [
-    ("Play some music.",
-     "I will search YouTube Music for a popular song. "
-     "[[MUSIC_PLAY:popular song]]"),
-    ("Play any song.",
-     "I will search YouTube Music for a popular song. "
-     "[[MUSIC_PLAY:popular song]]"),
-    ("Just play anything.",
-     "I will search YouTube Music for a popular song. "
-     "[[MUSIC_PLAY:popular song]]"),
-    ("Play Here Comes the Sun by the Beatles.",
-     "I will search YouTube Music for Here Comes the Sun by the Beatles. "
-     "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
+MUSIC_ROUTER_EXAMPLES = [
+    ("Play some music.", "[[MUSIC_PLAY:query]]"),
+    ("Play a song.", "[[MUSIC_PLAY:query]]"),
 ]
 
 # "about"   : read by the router (what requests belong to this group)
@@ -366,7 +356,7 @@ GROUPS = {
                  "to hear music now; use conversation context to resolve what "
                  "they want played",
         "ability": "play music from YouTube Music",
-        "examples": MUSIC_EXAMPLES,
+        "examples": MUSIC_ROUTER_EXAMPLES,
     },
 }
 
@@ -405,7 +395,6 @@ FAST_REPLIES = {
     "END_CONVERSATION": ["Okay. I will be here if you need me.",
                          "Goodbye. I am glad I could help.",
                          "Going quiet now. Say my name when you need me."],
-    "MUSIC_PLAY": ["I played {arg} for you."],
 }
 
 # Baymax-style lines for when speech wasn't understood (no LLM call needed).
@@ -491,23 +480,18 @@ def group_prompt(group):
     elif group == "MUSIC":
         lines.insert(
             1,
-            "For a play request, use recent conversation to understand the "
-            "person's meaning and choose a concise YouTube Music search query. "
-            "Do not mechanically copy the request if natural phrasing, "
-            "references, or a cover/performance description needs interpretation. "
-            "For a request with no specific song or artist, search using the "
-            "person's stated preferences; if there are none, use a broad query "
-            "for a popular song. Put only the search query in MUSIC_PLAY. The "
-            "assistant will show you YouTube Music results and ask you to pick "
-            "the result that best matches the request before playback.",
+            "To play music, determine the best YouTube Music search query based on "
+            "the person's request and conversation context. Put only the search query "
+            "in [[MUSIC_PLAY:query]].",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
             shown = f"[[{tag}:{arg}]]" if arg else f"[[{tag}]]"
             lines.append(f"- {shown} = {desc}")
-    lines.append("Examples:")
-    for user, reply in g["examples"]:
-        lines.append(f'Person: "{user}"\nYou: "{reply}"')
+    if group != "MUSIC" and g.get("examples"):
+        lines.append("Examples:")
+        for user, reply in g["examples"]:
+            lines.append(f'Person: "{user}"\nYou: "{reply}"')
     return "\n".join(lines)
 
 
