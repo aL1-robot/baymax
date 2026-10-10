@@ -479,10 +479,11 @@ class SentenceSpeaker:
 
     def _queue_complete_sentences(self, text):
         self.pending_text += text
-        boundary = re.compile(r"[.!?][\"')\]]*\s+")
+        boundary = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
         while match := boundary.search(self.pending_text):
-            sentence = self.pending_text[:match.end()].strip()
-            self.pending_text = self.pending_text[match.end():]
+            end = match.end()
+            sentence = self.pending_text[:end].strip()
+            self.pending_text = self.pending_text[end:].lstrip()
             if clean_for_speech(sentence):
                 self.has_spoken = True
                 self.queued_sentences += 1
