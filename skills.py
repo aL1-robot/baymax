@@ -142,7 +142,7 @@ def search_youtube_music(query):
             "ytmusicapi is not installed; update requirements and install the project dependencies"
         ) from error
 
-    matches = YTMusic().search(query, filter="songs", limit=10)
+    matches = YTMusic().search(query, filter="songs", limit=20)
     candidates = []
     seen_ids = set()
     for match in matches:
