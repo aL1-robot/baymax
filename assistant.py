@@ -85,6 +85,7 @@ WAKE_CONFIG = SCRIPT_DIR / "hey_baymax.json"
 PERSONA = (
     "You are Baymax, a gentle, friendly home assistant robot from Big Hero 6. "
     "You help with the room light, music, and everyday questions. "
+    "You are fully capable of controlling the lights and playing music; never state that you cannot do these things. "
     "Speak in short, calm, simple sentences. Be literal, sincere and patient. "
     "Stay in character. Keep replies under three sentences."
 )
@@ -1403,7 +1404,6 @@ def ask_music_llm(history, user_text, args):
         "[[MUSIC_SELECT:number]], using its exact number, or NONE. Do not "
         "explain, refuse, ask a question, or include any other text.\n\n"
         f"Search query: {query}\n"
-        f"Your intent: {search_reply}\n"
         "<youtube_music_results>\n"
         + json.dumps(visible_candidates, ensure_ascii=False)
         + "\n</youtube_music_results>"

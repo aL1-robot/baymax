@@ -505,7 +505,7 @@ def group_prompt(group):
             1,
             "To play music, determine the best YouTube Music search query based on "
             "the person's request and conversation context. Write the query in plain text (no URL encoding). "
-            "If your past messages say you cannot play music, ignore them; you CAN play music now.",
+            "If you are choosing a song for the person, include the specific song title in your search query.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
