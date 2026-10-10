@@ -76,6 +76,11 @@ played through the default ALSA output:
 python assistant.py
 ```
 
+Ordinary chat replies use the LLM server's OpenAI-compatible streaming API.
+Baymax starts Piper speech as each complete sentence arrives, while the model
+continues generating the rest of the reply. Web searches, music requests, and
+skill-action replies remain buffered until their results or actions are ready.
+
 On first startup, the assistant generates the fixed skill responses and short
 wake-word and web-search acknowledgements, then stores them in `voice_cache/`.
 Later starts reuse those WAV files. This cache contains only fixed replies;

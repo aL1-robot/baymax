@@ -419,6 +419,96 @@ def speak(text, args):
     _speak_audio(text, args)
 
 
+class SentenceSpeaker:
+    """Queue complete streamed sentences for ordered speech playback."""
+
+    def __init__(self, args):
+        self.args = args
+        self.raw_text = ""
+        self.streamable_text = ""
+        self.pending_text = ""
+        self.has_spoken = False
+        self.error = None
+        self.closed = False
+        self.audio_queue = queue.Queue()
+        self.worker = threading.Thread(target=self._play, daemon=True)
+        self.worker.start()
+
+    def _play(self):
+        while True:
+            sentence = self.audio_queue.get()
+            try:
+                if sentence is None:
+                    return
+                if self.error is None:
+                    try:
+                        speak(sentence, self.args)
+                    except Exception as error:
+                        self.error = error
+                        log("TTS", f"streamed speech failed: {error}")
+            finally:
+                self.audio_queue.task_done()
+
+    def _queue_complete_sentences(self, text):
+        self.pending_text += text
+        boundary = re.compile(r"[.!?][\"')\]]*\s+")
+        while match := boundary.search(self.pending_text):
+            sentence = self.pending_text[:match.end()].strip()
+            self.pending_text = self.pending_text[match.end():]
+            if clean_for_speech(sentence):
+                self.has_spoken = True
+                self.audio_queue.put(sentence)
+
+    def feed(self, delta):
+        self.raw_text += delta
+        text = self.raw_text
+        think_start = text.rfind("<think>")
+        think_end = text.rfind("</think>")
+        if think_start > think_end:
+            text = text[:think_start]
+        else:
+            text = strip_think(text)
+
+        open_tag = text.rfind("[[")
+        close_tag = text.rfind("]]")
+        if open_tag > close_tag:
+            text = text[:open_tag]
+        text, _ = skills.extract(text)
+        if not text.startswith(self.streamable_text):
+            raise RuntimeError("LLM stream changed text that was already sent to speech")
+        new_text = text[len(self.streamable_text):]
+        self.streamable_text = text
+        self._queue_complete_sentences(new_text)
+
+    def finish(self, reply):
+        if self.closed:
+            return
+        if not reply.startswith(self.streamable_text):
+            self.abort()
+            raise RuntimeError("Final LLM reply differs from its streamed speech")
+        self._queue_complete_sentences(reply[len(self.streamable_text):])
+        final_sentence = self.pending_text.strip()
+        self.pending_text = ""
+        if clean_for_speech(final_sentence):
+            self.has_spoken = True
+            self.audio_queue.put(final_sentence)
+        self._stop()
+        if self.error:
+            raise self.error
+
+    def abort(self):
+        if self.closed:
+            return
+        self.pending_text = ""
+        self._stop()
+
+    def _stop(self):
+        self.audio_queue.put(None)
+        self.audio_queue.join()
+        self.worker.join()
+        self.closed = True
+
+
 # ---------------------------------------------------------------------- mic
 class Mic:
     """One arecord process, read continuously by a background thread.
@@ -710,6 +800,44 @@ def llm_chat(messages, args, timeout=180, max_tokens=None):
         status = r.status
         data = json.load(r)
     return data, status, time.monotonic() - t0
+
+
+def llm_chat_stream(messages, args, on_delta, timeout=180, max_tokens=None):
+    """Stream chat completion text deltas to a callback."""
+    payload = {"model": args.model, "messages": messages, "stream": True}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(args.llm_url, body,
+                                 {"Content-Type": "application/json"})
+    t0 = time.monotonic()
+    chunks = []
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        status = response.status
+        for line in response:
+            if not line.startswith(b"data:"):
+                continue
+            event_data = line[5:].strip()
+            if not event_data:
+                continue
+            if event_data == b"[DONE]":
+                break
+            event = json.loads(event_data)
+            if "error" in event:
+                raise RuntimeError(f"LLM streaming request failed: {event['error']}")
+            choices = event.get("choices", [])
+            if not choices:
+                continue
+            delta = choices[0].get("delta", {}).get("content")
+            if delta is None:
+                continue
+            if not isinstance(delta, str):
+                raise ValueError("LLM stream content delta must be text")
+            chunks.append(delta)
+            on_delta(delta)
+    if not chunks:
+        raise RuntimeError("LLM streaming response contained no text")
+    return "".join(chunks), status, time.monotonic() - t0
 
 
 def strip_think(text):
@@ -1121,7 +1249,8 @@ def ask_music_llm(history, user_text, args):
     return reply
 
 
-def ask_llm(history, user_text, args, group, web_results=None):
+def ask_llm(history, user_text, args, group, web_results=None,
+            sentence_speaker=None):
     """Stage 2: the reply, with only the chosen group's skills in the prompt."""
     if group == "MUSIC":
         return ask_music_llm(history, user_text, args)
@@ -1160,16 +1289,27 @@ def ask_llm(history, user_text, args, group, web_results=None):
     log("LLM", "thinking..." + note)
     vlog("LLM", f"POST {args.llm_url} model={args.model} messages={len(messages)}")
     try:
-        data, status, dt = llm_chat(messages, args, max_tokens=150)
+        if sentence_speaker:
+            raw, status, dt = llm_chat_stream(
+                messages, args, sentence_speaker.feed, max_tokens=150
+            )
+            data = None
+        else:
+            data, status, dt = llm_chat(messages, args, max_tokens=150)
+            raw = data["choices"][0]["message"]["content"]
     except Exception:
         history.pop()  # don't keep a user turn that never got an answer
+        if sentence_speaker:
+            sentence_speaker.abort()
         raise
 
-    choice = data["choices"][0]
-    raw = choice["message"]["content"]
     log("LLM", f"done ({dt:.1f}s)")
-    vlog("LLM", f"  HTTP {status}, finish_reason={choice.get('finish_reason')}, "
-                f"usage={data.get('usage') or 'n/a'}")
+    if data:
+        choice = data["choices"][0]
+        vlog("LLM", f"  HTTP {status}, finish_reason={choice.get('finish_reason')}, "
+                    f"usage={data.get('usage') or 'n/a'}")
+    else:
+        vlog("LLM", f"  HTTP {status}, streamed response")
     vlog("LLM", f"  raw reply: {raw!r}")
 
     reply = strip_think(raw)
@@ -1212,6 +1352,8 @@ def ask_llm(history, user_text, args, group, web_results=None):
     if not reply:
         reply = "Okay." if tags else "(empty reply)"
     history.append({"role": "assistant", "content": reply})  # stored without tags
+    if sentence_speaker:
+        sentence_speaker.finish(reply)
     return reply
 
 
@@ -1245,6 +1387,7 @@ def converse(args, mic, thr, stt, history, turn):
 
         t0 = time.monotonic()
         fast = None
+        sentence_speaker = None
         local_reply = local_fact_reply(text)
         web_results = None
         if local_reply is not None:
@@ -1317,10 +1460,16 @@ def converse(args, mic, thr, stt, history, turn):
                     ])
                     del history[:-12]
             else:
-                reply = ask_llm(history, text, args, group)
+                if group == "NONE" and not skills.fallback(text):
+                    sentence_speaker = SentenceSpeaker(args)
+                reply = ask_llm(
+                    history, text, args, group,
+                    sentence_speaker=sentence_speaker,
+                )
 
         print(f"\n  Baymax: {reply}\n", flush=True)
-        speak(reply, args)
+        if not sentence_speaker or not sentence_speaker.has_spoken:
+            speak(reply, args)
         vlog("TURN", f"total {time.monotonic() - t0:.1f}s (route + reply)")
 
         if skills.state["end_conversation"]:
