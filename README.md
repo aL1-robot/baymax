@@ -137,14 +137,12 @@ voice command to stop the track while it is playing. Playback errors are
 reported after the player exits. This uses free, unofficial YouTube search and
 playback, requires an internet connection, and may be affected by YouTube or
 yt-dlp changes.
-Music requests use the recent conversation as context, so follow-ups such as
-“play one of their songs” can refer to an artist discussed earlier. Baymax
-checks YouTube Music song titles and artists against the requested artist/song
-before playback;
-if no result matches, it reports that instead of playing the first unrelated
-result. If you ask for a kind of song or artist without naming a specific
-track, Baymax searches the web for a concrete song recommendation first and
-only plays a title supported by those results.
+The LLM interprets music requests using the recent conversation, creates a
+YouTube Music search query, and then receives the actual song results (including
+titles, artists, albums, and durations) to choose the best match. Playback is
+limited to one of those returned results; if the model cannot identify a
+suitable match, Baymax does not start playback. For broad requests, the model
+chooses a search query based on the person's stated preferences.
 
 YouTube Music search uses the public, unauthenticated `ytmusicapi` interface;
 install it with the project's requirements. Audio extraction still uses

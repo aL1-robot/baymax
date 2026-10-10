@@ -49,7 +49,6 @@ import shutil
 import subprocess
 import sys
 import time
-import unicodedata
 
 
 # --------------------------------------------------------------- LED strip
@@ -134,188 +133,8 @@ def end_conversation():
     return "ending the conversation, going idle"
 
 
-_MUSIC_QUERY_FILLERS = {
-    "a", "about", "and", "anything", "any", "band", "by", "can", "featuring",
-    "feat", "for", "from", "i", "like", "listen", "me", "music", "of",
-    "on", "one", "play", "please", "popular", "put", "s", "singer", "sing",
-    "song", "some", "something", "the", "their", "to", "track", "with",
-    "you",
-}
-_MUSIC_GENERIC_QUERIES = {
-    "any song", "any music", "anything", "something", "some music", "music",
-    "a song", "popular music", "any song please", "anything please",
-}
-_MUSIC_PREFERENCE_TERMS = {
-    "a", "any", "artist", "band", "filipino", "indonesian", "japanese",
-    "korean", "popular", "random", "singer", "song", "some", "something",
-    "thai", "track", "trending",
-}
-_MUSIC_CONFIRMATIONS = re.compile(
-    r"^\s*(?:yes|yeah|yep|sure|okay|ok|go ahead|sounds good|do that)[.! ]*$",
-    re.I,
-)
-
-
-def _music_title_tokens(text):
-    text = re.sub(r"(?<=\w)['’]s\b", "", text)
-    normalized = unicodedata.normalize("NFKD", text).encode(
-        "ascii", "ignore"
-    ).decode("ascii").lower()
-    return re.findall(r"[a-z0-9]+", normalized)
-
-
-def _music_query_terms(query):
-    return {
-        token for token in _music_title_tokens(query)
-        if token not in _MUSIC_QUERY_FILLERS
-    }
-
-
-def music_request_intent(text, history=()):
-    """Recognize play requests, including short confirmations of a song offer."""
-    if re.search(r"\b(?:play|put on|queue)\b", text, re.I):
-        return not re.search(r"\b(?:game|video game|movie)\b", text, re.I)
-    if not _MUSIC_CONFIRMATIONS.match(text):
-        return False
-    recent = list(history)[-6:]
-    assistant_offered_song = any(
-        message.get("role") == "assistant"
-        and re.search(r"\b(?:how about|let me|i can|shall i|would you like)\b",
-                      message.get("content", ""), re.I)
-        and (
-            re.search(r"\b(?:song|music|play)\b", message.get("content", ""), re.I)
-            or re.search(r"[\"'“][^\"'”]+[\"'”]", message.get("content", ""))
-            or re.search(r"\bby\s+[A-Z]", message.get("content", ""))
-        )
-        for message in recent
-    )
-    user_requested_music = any(
-        message.get("role") == "user"
-        and re.search(r"\b(?:play|music|song|track)\b", message.get("content", ""), re.I)
-        for message in recent
-    )
-    return assistant_offered_song and user_requested_music
-
-
-def music_query_for_request(text, history=()):
-    """Derive explicit/generic requests or a confirmed song offer."""
-    if _MUSIC_CONFIRMATIONS.match(text):
-        if not music_request_intent(text, history):
-            return None
-        for message in reversed(list(history)[-6:]):
-            if message.get("role") != "assistant":
-                continue
-            content = message.get("content", "")
-            match = re.search(
-                r"[\"'“]([^\"'”]+)[\"'”](?:\s+by\s+([A-Z][\w& .'-]+?))?"
-                r"(?=[,!.?]|$)",
-                content,
-            )
-            if match:
-                return " ".join(part.strip() for part in match.groups() if part)
-            match = re.search(
-                r"\b(?:how about|let me play|i can play|shall i play)\s+"
-                r"(.+?)(?:[?!.,]|$)",
-                content,
-                re.I,
-            )
-            if match:
-                query = match.group(1).strip(" \"'“”")
-                if _music_query_terms(query):
-                    return query[:160]
-        return None
-
-    match = re.search(r"\b(?:play|put on|queue)\s+(.+)$", text, re.I)
-    if not match or not music_request_intent(text, history):
-        return None
-    query = re.sub(r"\s+", " ", match.group(1)).strip(" .,!?'\"")
-    query = re.sub(r"^(?:(?:me|some|any|a|the)\s+)+", "", query, flags=re.I)
-    query = re.sub(r"^(?:song|music|track)\s+", "", query, flags=re.I).strip()
-    if not query:
-        return "popular music"
-    if query.lower() in _MUSIC_GENERIC_QUERIES:
-        return "popular music"
-    if re.search(r"\b(?:them|their|they|that|those|one)\b", query, re.I):
-        return None
-    return query[:160]
-
-
-def music_query_matches_context(query, history):
-    """Accept contextual music queries only when they include a known name."""
-    context_fillers = {
-        "conversation", "context", "discussed", "discussion", "our", "previous",
-        "recent", "them", "their", "they", "those", "that", "one", "we",
-    }
-    query_terms = _music_query_terms(query) - context_fillers
-    context_terms = set()
-    for message in history:
-        context_terms.update(_music_query_terms(message.get("content", "")))
-    return bool(query_terms & context_terms)
-
-
-def music_needs_recommendation(text, history=()):
-    """Whether a request needs web research to pick a concrete song."""
-    if not music_request_intent(text, history):
-        return False
-    query = music_query_for_request(text, history)
-    if query is None:
-        return False
-    terms = _music_query_terms(query)
-    # A request for anything can go straight to YouTube Music's song catalogue.
-    # Web search is useful only when the person gave a preference to research.
-    return bool(terms) and terms <= _MUSIC_PREFERENCE_TERMS
-
-
-def _music_title_matches(query, title, artists=()):
-    query_terms = _music_query_terms(query)
-    if not query_terms:
-        return True
-
-    def matches(requested, candidates):
-        return any(
-            candidate == requested
-            or (
-                min(len(candidate), len(requested)) >= 3
-                and abs(len(candidate) - len(requested)) <= 1
-                and (candidate.startswith(requested) or requested.startswith(candidate))
-            )
-            for candidate in candidates
-        )
-
-    title_tokens = set(_music_title_tokens(title))
-    artist_tokens = set(_music_title_tokens(" ".join(artists)))
-    # Require the song name itself to be present; remaining request words may
-    # match an artist, allowing variants such as "Mahika from Adi" or "Adi's
-    # song Mahika" without accepting a different song by the same artist.
-    return (
-        any(matches(term, title_tokens) for term in query_terms)
-        and all(matches(term, title_tokens | artist_tokens) for term in query_terms)
-    )
-
-
-def music_result_supports_query(query, results):
-    """Require one search result to contain all meaningful song/artist terms."""
-    terms = _music_query_terms(query)
-    if not terms or terms <= _MUSIC_PREFERENCE_TERMS:
-        return False
-    for result in results:
-        source_terms = set(_music_title_tokens(
-            f"{result.get('title', '')} {result.get('snippet', '')}"
-        ))
-        if terms <= source_terms:
-            return True
-    return False
-
-
-def play_youtube_music(query):
-    """Find a song in YouTube Music and play its audio with mpv."""
-    player = shutil.which("mpv")
-    if not player:
-        raise FileNotFoundError("mpv is not installed; install it with your system package manager")
-    try:
-        import yt_dlp
-    except ImportError as error:
-        raise RuntimeError("yt-dlp is not installed; install the project requirements") from error
+def search_youtube_music(query):
+    """Return available song candidates from YouTube Music."""
     try:
         from ytmusicapi import YTMusic
     except ImportError as error:
@@ -340,21 +159,30 @@ def play_youtube_music(query):
         ]
         if not video_id or not title or video_id in seen_ids:
             continue
-        if not _music_title_matches(query, title, artist_names):
-            continue
         seen_ids.add(video_id)
+        album = match.get("album") or {}
         candidates.append({
             "video_id": video_id,
             "title": title,
             "artists": artist_names,
+            "album": str(album.get("name") or "") if isinstance(album, dict) else "",
+            "duration": str(match.get("duration") or ""),
         })
+    return candidates
 
-    if not candidates:
-        raise LookupError(
-            f"YouTube Music found no song matching {query!r}. "
-            "Please repeat the song or artist name."
-        )
 
+def play_youtube_music_result(candidate):
+    """Resolve and play a specific YouTube Music search result."""
+    player = shutil.which("mpv")
+    if not player:
+        raise FileNotFoundError("mpv is not installed; install it with your system package manager")
+    try:
+        import yt_dlp
+    except ImportError as error:
+        raise RuntimeError("yt-dlp is not installed; install the project requirements") from error
+
+    if not candidate.get("video_id") or not candidate.get("title"):
+        raise ValueError("YouTube Music result is missing its video ID or title")
     player_attempts = (
         ["default", "web_embedded", "-tv_downgraded"],
         ["web_safari", "web_embedded", "-tv_downgraded"],
@@ -373,27 +201,24 @@ def play_youtube_music(query):
 
     last_error = None
     selected = None
-    for candidate in candidates:
-        music_url = f"https://music.youtube.com/watch?v={candidate['video_id']}"
-        for clients in player_attempts:
-            options = {
-                "quiet": True,
-                "no_warnings": True,
-                "noplaylist": True,
-                "format": "bestaudio/best",
-                "extractor_args": {"youtube": {"player_client": clients}},
-                "logger": QuietYtDlpLogger(),
-            }
-            try:
-                with yt_dlp.YoutubeDL(options) as downloader:
-                    entry = downloader.extract_info(music_url, download=False)
-            except yt_dlp.utils.DownloadError as error:
-                last_error = error
-                continue
-            if entry and entry.get("url"):
-                selected = (candidate, entry["url"])
-                break
-        if selected:
+    music_url = f"https://music.youtube.com/watch?v={candidate['video_id']}"
+    for clients in player_attempts:
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "format": "bestaudio/best",
+            "extractor_args": {"youtube": {"player_client": clients}},
+            "logger": QuietYtDlpLogger(),
+        }
+        try:
+            with yt_dlp.YoutubeDL(options) as downloader:
+                entry = downloader.extract_info(music_url, download=False)
+        except yt_dlp.utils.DownloadError as error:
+            last_error = error
+            continue
+        if entry and entry.get("url"):
+            selected = (candidate, entry["url"])
             break
 
     if not selected:
@@ -421,6 +246,14 @@ def play_youtube_music(query):
     if played.returncode:
         raise RuntimeError(f"mpv exited with status {played.returncode}")
     return title
+
+
+def play_youtube_music(query):
+    """Compatibility wrapper that plays YouTube Music's first search result."""
+    candidates = search_youtube_music(query)
+    if not candidates:
+        raise LookupError(f"YouTube Music returned no songs for {query!r}.")
+    return play_youtube_music_result(candidates[0])
 
 
 # ----------------------------------------------------------- strict matchers
@@ -498,16 +331,16 @@ CONVO_EXAMPLES = [
 
 MUSIC_EXAMPLES = [
     ("Play some music.",
-     "I will look for some music and start playing it. "
-     "[[MUSIC_PLAY:popular music]]"),
+     "I will search YouTube Music for a popular song. "
+     "[[MUSIC_PLAY:popular song]]"),
     ("Play any song.",
-     "I will choose a popular song and start playing it. "
-     "[[MUSIC_PLAY:popular music]]"),
+     "I will search YouTube Music for a popular song. "
+     "[[MUSIC_PLAY:popular song]]"),
     ("Just play anything.",
-     "I will choose a popular song and start playing it. "
-     "[[MUSIC_PLAY:popular music]]"),
+     "I will search YouTube Music for a popular song. "
+     "[[MUSIC_PLAY:popular song]]"),
     ("Play Here Comes the Sun by the Beatles.",
-     "I will look for Here Comes the Sun by the Beatles and start playing it. "
+     "I will search YouTube Music for Here Comes the Sun by the Beatles. "
      "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
 ]
 
@@ -529,7 +362,8 @@ GROUPS = {
         "fast": _convo_fast,
     },
     "MUSIC": {
-        "about": "play requested songs or music from YouTube Music",
+        "about": "play music or a particular song, including requests that refer "
+                 "to recent conversation",
         "ability": "play music from YouTube Music",
         "examples": MUSIC_EXAMPLES,
     },
@@ -549,7 +383,7 @@ SKILLS = {
     "END_CONVERSATION": ("CONVERSATION",
                          "end the conversation; you will go idle until the "
                          "next wake word",                        end_conversation, None),
-    "MUSIC_PLAY": ("MUSIC", "find a song in YouTube Music and play its audio",
+    "MUSIC_PLAY": ("MUSIC", "search YouTube Music for a song query",
                    play_youtube_music, "QUERY"),
 }
 
@@ -649,15 +483,15 @@ def group_prompt(group):
     elif group == "MUSIC":
         lines.insert(
             1,
-            "When the person directly asks you to play something, do not ask "
-            "what kind they prefer; choose a popular song if they said any "
-            "song or anything, and include MUSIC_PLAY. Use the recent "
-            "conversation to resolve references such as 'their "
-            "songs' or 'that band'. Make each MUSIC_PLAY query self-contained "
-            "by using the actual song or artist name established in context. "
-            "Never use a description of the conversation as a query. If context "
-            "does not identify a song or artist, ask a brief clarifying "
-            "question and do not use a tag.",
+            "For a play request, use recent conversation to understand the "
+            "person's meaning and choose a concise YouTube Music search query. "
+            "Do not mechanically copy the request if natural phrasing, "
+            "references, or a cover/performance description needs interpretation. "
+            "For a request with no specific song or artist, search using the "
+            "person's stated preferences; if there are none, use a broad query "
+            "for a popular song. Put only the search query in MUSIC_PLAY. The "
+            "assistant will show you YouTube Music results and ask you to pick "
+            "the result that best matches the request before playback.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
