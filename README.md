@@ -143,6 +143,8 @@ titles, artists, albums, and durations) to choose the best match. Playback is
 limited to one of those returned results; if the model cannot identify a
 suitable match, Baymax does not start playback. For broad requests, the model
 chooses a search query based on the person's stated preferences.
+Requests for music information, such as lists or recommendations, use web
+search; YouTube Music search is for requests to play music.
 
 YouTube Music search uses the public, unauthenticated `ytmusicapi` interface;
 install it with the project's requirements. Audio extraction still uses

@@ -839,20 +839,6 @@ def _plain_html(fragment):
     return " ".join("".join(parser.parts).split())
 
 
-def _is_web_question(user_text):
-    text = user_text.strip().lower()
-    if re.search(r"\b(search|look up|find online|on the internet|browse the web)\b", text):
-        return True
-    if re.match(r"^(?:do you know|have you heard of|can you tell me about)\b", text):
-        return True
-    if re.search(r"\b(latest|current|recent|news|weather|forecast|stock price|"
-                 r"exchange rate|today's|today’s|score)\b", text):
-        return True
-    if re.match(r"^(who|what|where|when|why|how|which)\b", text):
-        return not re.match(r"^(how are you|what do you think|what can you do)\b", text)
-    return False
-
-
 def search_web(query, searxng_url="http://localhost:8082/search"):
     """Try SearXNG first, then DuckDuckGo and Wikipedia for sourced snippets."""
     user_agent = {"User-Agent": "BaymaxAssistant/1.0 (local voice assistant)"}
@@ -1251,7 +1237,6 @@ def converse(args, mic, thr, stt, history, turn):
         fast = None
         local_reply = local_fact_reply(text)
         web_results = None
-        web_question = _is_web_question(text)
         if local_reply is not None:
             misses = 0
             reply = local_reply
@@ -1269,12 +1254,8 @@ def converse(args, mic, thr, stt, history, turn):
             fast = skills.fast_action(text)
             if fast:
                 group = "FAST"
-            elif web_question:
-                group = "WEB"
             else:
                 group = route(text, args, history)
-                if group == "WEB":
-                    web_question = True
 
         if local_reply is not None:
             pass
@@ -1299,7 +1280,7 @@ def converse(args, mic, thr, stt, history, turn):
             del history[:-12]
         else:
             misses = 0
-            if web_question:
+            if group == "WEB":
                 log("WEB", "searching free web sources...")
                 web_acknowledgement = random.choice(WEB_SEARCH_REPLIES)
                 print(f"\n  Baymax: {web_acknowledgement}\n", flush=True)

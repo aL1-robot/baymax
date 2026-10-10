@@ -362,8 +362,9 @@ GROUPS = {
         "fast": _convo_fast,
     },
     "MUSIC": {
-        "about": "play music or a particular song, including requests that refer "
-                 "to recent conversation",
+        "about": "search YouTube Music and start playback when the person wants "
+                 "to hear music now; use conversation context to resolve what "
+                 "they want played",
         "ability": "play music from YouTube Music",
         "examples": MUSIC_EXAMPLES,
     },
@@ -438,10 +439,11 @@ def router_prompt():
     for name, g in GROUPS.items():
         lines.append(f"{name} - {g['about']}")
     lines.extend([
-        "WEB - the person wants factual information, identification, an "
-        "explanation, recommendations, or other information that should be "
-        "checked against outside sources. Use WEB even if they do not say "
-        "'search' or 'look it up'.",
+        "WEB - retrieve and summarize information from outside sources. Use "
+        "this for questions, requested lists, facts, explanations, comparisons, "
+        "or recommendations, including music information. Choose WEB when the "
+        "person wants information about music; choose MUSIC only when they "
+        "want music playback.",
         "NONE - ordinary conversation, personal feelings, or opinions that "
         "need no action and no outside facts. A request to perform a listed "
         "ability is never NONE.",
