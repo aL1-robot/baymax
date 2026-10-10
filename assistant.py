@@ -1511,19 +1511,6 @@ def ask_llm(history, user_text, args, group, web_results=None,
     reply = strip_think(raw)
     if reply != raw.strip():
         vlog("LLM", "  stripped a <think> block")
-    if web_results:
-        attribution_matches = any(
-            re.match(
-                rf"^\s*according to\s+{re.escape(item.get('engine') or '')}\b",
-                reply,
-                re.I,
-            )
-            for item in web_results
-            if item.get("engine")
-        )
-        if not attribution_matches:
-            engine = web_results[0].get("engine") or "the search results"
-            reply = f"According to {engine}, {reply}"
 
     # skills: the model puts tags like [[LIGHT_ON]] at the end of its reply
     reply, tags = skills.extract(reply)
@@ -1647,7 +1634,8 @@ def converse(args, mic, thr, stt, history, turn):
                             f"{item['title']} - {item['url']}",
                             flush=True,
                         )
-                    reply = ask_llm(history, text, args, group, web_results)
+                    sentence_speaker = SentenceSpeaker(args)
+                    reply = ask_llm(history, text, args, group, web_results, sentence_speaker=sentence_speaker)
                 else:
                     reply = "I couldn't find useful web results right now."
                     history.extend([
