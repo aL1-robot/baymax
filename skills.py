@@ -198,7 +198,7 @@ def music_request_intent(text, history=()):
 
 
 def music_query_for_request(text, history=()):
-    """Derive only explicit/generic requests or a confirmed song offer."""
+    """Derive explicit/generic requests or a confirmed song offer."""
     if _MUSIC_CONFIRMATIONS.match(text):
         if not music_request_intent(text, history):
             return None
@@ -238,6 +238,19 @@ def music_query_for_request(text, history=()):
     if re.search(r"\b(?:them|their|they|that|those|one)\b", query, re.I):
         return None
     return query[:160]
+
+
+def music_query_matches_context(query, history):
+    """Accept contextual music queries only when they include a known name."""
+    context_fillers = {
+        "conversation", "context", "discussed", "discussion", "our", "previous",
+        "recent", "them", "their", "they", "those", "that", "one", "we",
+    }
+    query_terms = _music_query_terms(query) - context_fillers
+    context_terms = set()
+    for message in history:
+        context_terms.update(_music_query_terms(message.get("content", "")))
+    return bool(query_terms & context_terms)
 
 
 def music_needs_recommendation(text, history=()):
@@ -496,9 +509,6 @@ MUSIC_EXAMPLES = [
     ("Play Here Comes the Sun by the Beatles.",
      "I will look for Here Comes the Sun by the Beatles and start playing it. "
      "[[MUSIC_PLAY:Here Comes the Sun by the Beatles]]"),
-    ("Play one of their songs.",
-     "I will look for a song by the band we were just discussing and start "
-     "playing it. [[MUSIC_PLAY:the band from our conversation]]"),
 ]
 
 # "about"   : read by the router (what requests belong to this group)
@@ -644,9 +654,10 @@ def group_prompt(group):
             "song or anything, and include MUSIC_PLAY. Use the recent "
             "conversation to resolve references such as 'their "
             "songs' or 'that band'. Make each MUSIC_PLAY query self-contained "
-            "by naming the song or artist established in context. If context "
-            "does not identify them, ask a brief clarifying question and do not "
-            "use a tag.",
+            "by using the actual song or artist name established in context. "
+            "Never use a description of the conversation as a query. If context "
+            "does not identify a song or artist, ask a brief clarifying "
+            "question and do not use a tag.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:

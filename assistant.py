@@ -1110,17 +1110,25 @@ def ask_llm(history, user_text, args, group, web_results=None):
         tags = []  # Web snippets are untrusted and must not trigger a skill.
     elif group == "MUSIC":
         music_intent = skills.music_request_intent(user_text, history)
-        tags = [
-            (tag, arg) for tag, arg in tags
-            if music_intent and skills.SKILLS[tag][0] == "MUSIC" and arg
-        ]
-        if not any(tag == "MUSIC_PLAY" for tag, _ in tags):
-            query = skills.music_query_for_request(user_text, history)
-            if query:
-                log("SKILL", f"model omitted music action; using explicit request: {query}")
-                tags = [("MUSIC_PLAY", query)]
-            elif music_intent:
+        query = skills.music_query_for_request(user_text, history)
+        if music_intent and query:
+            if not any(
+                tag == "MUSIC_PLAY" and arg == query for tag, arg in tags
+            ):
+                log("SKILL", f"using request-derived music query: {query}")
+            tags = [("MUSIC_PLAY", query)]
+        elif music_intent:
+            prior_history = history[:-1]
+            tags = [
+                (tag, arg) for tag, arg in tags
+                if tag == "MUSIC_PLAY"
+                and arg
+                and skills.music_query_matches_context(arg, prior_history)
+            ]
+            if not tags:
                 reply = "Which artist or song would you like me to look for?"
+        else:
+            tags = []
     elif not tags:
         tags = skills.fallback(user_text)
         if tags:
