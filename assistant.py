@@ -479,7 +479,10 @@ class SentenceSpeaker:
 
     def _queue_complete_sentences(self, text):
         self.pending_text += text
-        boundary = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
+        # Split on sentence-ending punctuation OR newlines so that list items,
+        # colon-terminated headers, and other line-based content are queued
+        # for TTS as soon as they arrive during streaming (not only at the end).
+        boundary = re.compile(r"[.!?][\"')\]]*(?=\s|$)|\n")
         while match := boundary.search(self.pending_text):
             end = match.end()
             sentence = self.pending_text[:end].strip()
