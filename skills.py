@@ -329,10 +329,7 @@ CONVO_EXAMPLES = [
      "I am functioning well. How are you feeling?"),
 ]
 
-MUSIC_ROUTER_EXAMPLES = [
-    ("Play some music.", "[[MUSIC_PLAY:query]]"),
-    ("Play a song.", "[[MUSIC_PLAY:query]]"),
-]
+
 
 # "about"   : read by the router (what requests belong to this group)
 # "ability" : short phrase Baymax can say out loud when he lists what he can do
@@ -356,7 +353,7 @@ GROUPS = {
                  "to hear music now; use conversation context to resolve what "
                  "they want played",
         "ability": "play music from YouTube Music",
-        "examples": MUSIC_ROUTER_EXAMPLES,
+        "examples": [],
     },
 }
 
@@ -481,8 +478,7 @@ def group_prompt(group):
         lines.insert(
             1,
             "To play music, determine the best YouTube Music search query based on "
-            "the person's request and conversation context. Put only the search query "
-            "in [[MUSIC_PLAY:query]].",
+            "the person's request and conversation context.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
