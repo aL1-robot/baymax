@@ -2,3 +2,4 @@ archive/
 piper/
 .venv/
 voice_cache/
+.env
