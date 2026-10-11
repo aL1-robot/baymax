@@ -428,10 +428,13 @@ def router_prompt():
     for name, g in GROUPS.items():
         lines.append(f"{name} - {g['about']}")
     lines.extend([
-        "WEB - the person wants information that should be retrieved from "
-        "outside sources.",
-        "NONE - ordinary conversation, personal feelings, or opinions that "
-        "do not need outside information or an ability.",
+        "WEB - the person asks about real-world facts that may be specific, "
+        "time-sensitive, or outside your reliable knowledge: charts, rankings, "
+        "top or popular lists, best-of-year items, current events, release "
+        "dates, award winners, statistics, lyrics, news, prices, or any factual "
+        "claim you might get wrong. When in doubt, choose WEB.",
+        "NONE - ordinary conversation, personal feelings, or subjective opinions "
+        "that genuinely do not need outside information.",
     ])
     lines.extend([
         "UNSUPPORTED - the person wants an action that is not available.",

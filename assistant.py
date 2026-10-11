@@ -91,6 +91,8 @@ PERSONA = (
     "Do not assume a follow-up is a new, unrelated request. If its meaning "
     "cannot be determined from context, ask a brief clarifying question rather "
     "than guessing. "
+    "When you are not certain of a specific fact, say you will look it up "
+    "rather than guessing. "
     "Speak in short, calm, simple sentences. Be literal, sincere and patient. "
     "Stay in character. Keep replies under three sentences."
 )
@@ -128,6 +130,35 @@ WEB_SEARCH_REPLIES = [
     "Let me check a few sources.",
     "I'll find out for you.",
 ]
+
+# Patterns that reliably indicate a real-world factual question that the small
+# LLM cannot answer reliably from training data.  Matched requests are routed
+# straight to WEB before the LLM router runs, so the model never gets a chance
+# to hallucinate a confident-sounding but wrong answer.
+_FACTUAL_RE = re.compile(
+    r"\b("
+    # Rankings / charts / popularity
+    r"popular|best|top\s+\d+?|number[\s-]?one|number[\s-]?1|#\s*1|"
+    r"chart|charts|billboard|grammy|oscar|emmy|award|awards|nomination|"
+    r"biggest\s+hit|hit\s+song|"
+    # Factual who/what/when questions about named things
+    r"who\s+(is|was|are|were|won|played|wrote|sang|directed|created)|"
+    r"what\s+(song|movie|album|show|film|band|artist|singer|group)\s+(did|was|is|won|topped|hit)|"
+    r"when\s+(did|was|were)\s+\w+(\s+\w+)?\s+(release|come\s+out|born|die|win|debut)|"
+    r"release\s+date|came\s+out\s+in|dropped\s+in|"
+    # Time-anchored queries
+    r"in\s+(19|20)\d\d|from\s+(19|20)\d\d|of\s+(19|20)\d\d|"
+    r"current(ly)?|latest|most\s+recent|right\s+now|"
+    # Lyrics / stats
+    r"lyrics?\s+(to|of|for|from)|words\s+(to|of)\s+the\s+song|"
+    r"how\s+many\s+\w+(\s+\w+)?\s+(did|has|have|sold|won|made|earned)|"
+    # Explicit list requests about real-world content
+    r"list\s+(of\s+)?(popular|best|top|hit|famous|classic)|"
+    r"what\s+were\s+the\s+(best|top|popular|biggest|hit|most)|"
+    r"name\s+(some|a\s+few|\d+)\s+(popular|famous|top|hit|classic)"
+    r")\b",
+    re.I,
+)
 TTS_LEADING_SILENCE_SECONDS = 0.3
 TTS_CACHE_VERSION = 2
 
@@ -1250,6 +1281,16 @@ def search_web(query, searxng_url="http://localhost:8082/search"):
     return results
 
 
+def needs_web_search(text):
+    """True when the question almost certainly requires a live factual lookup.
+
+    Called before the LLM router so we never hand a question like 'what were
+    the most popular songs in 1998' to a small model that will hallucinate a
+    plausible-sounding but wrong answer.
+    """
+    return bool(_FACTUAL_RE.search(text))
+
+
 def route(user_text, args, history=None):
     """Stage 1: which skill group (or UNSUPPORTED / UNCLEAR / NONE)?"""
     fast = skills.fast_group(user_text)
@@ -1595,6 +1636,9 @@ def converse(args, mic, thr, stt, history, turn):
             fast = skills.fast_action(text)
             if fast:
                 group = "FAST"
+            elif needs_web_search(text):
+                log("ROUTE", "WEB (factual question, router skipped)")
+                group = "WEB"
             else:
                 group = route(text, args, history)
 
