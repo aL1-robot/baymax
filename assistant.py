@@ -1230,7 +1230,7 @@ def search_web(
     parsed = urlparse(openserp_url)
     params = parse_qs(parsed.query)
     params.update({
-        "engines": ["google,bing,duckduckgo"],
+        "engines": ["google,duckduckgo,bing"],
         "text": [query],
         "mode": ["any"],
         "limit": ["5"],
