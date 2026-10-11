@@ -1225,6 +1225,7 @@ def search_web(
         searxng_url="http://localhost:8082/search",
         openserp_url="http://127.0.0.1:7000/mega/search"):
     """Try OpenSERP first, then the existing search providers as fallbacks."""
+    vlog("WEB", f"search query: {query}")
     user_agent = {"User-Agent": "BaymaxAssistant/1.0 (local voice assistant)"}
 
     parsed = urlparse(openserp_url)
@@ -1401,19 +1402,18 @@ def search_web(
 def needs_web_search(text):
     """True when the question almost certainly requires a live factual lookup.
 
-    Called before the LLM router so we never hand a question like 'what were
-    the most popular songs in 1998' to a small model that will hallucinate a
-    plausible-sounding but wrong answer.
+    These questions are forced through the WEB route so the LLM can produce a
+    focused search query without being asked to answer from memory.
     """
     return bool(_FACTUAL_RE.search(text))
 
 
-def route(user_text, args, history=None):
-    """Stage 1: which skill group (or UNSUPPORTED / UNCLEAR / NONE)?"""
+def route(user_text, args, history=None, force_web=False):
+    """Stage 1: classify intent and, for WEB, create a focused search query."""
     fast = skills.fast_group(user_text)
-    if fast:
+    if fast and not force_web:
         log("ROUTE", f"{fast} (obvious command, router skipped)")
-        return fast
+        return fast, None
 
     context = []
     for message in (history or [])[-6:]:
@@ -1427,19 +1427,38 @@ def route(user_text, args, history=None):
             + "\nCurrent request: " + user_text
         )
     messages = [
-        {"role": "system", "content": skills.router_prompt()},
+        {"role": "system", "content": skills.router_prompt(force_web=force_web)},
         {"role": "user", "content": request + " /no_think"},
     ]
     try:
-        data, _, dt = llm_chat(messages, args, timeout=60, max_tokens=24)
+        data, _, dt = llm_chat(messages, args, timeout=60, max_tokens=96)
         raw = strip_think(data["choices"][0]["message"]["content"])
     except Exception as e:
         log("ROUTE", f"router failed ({e}); treating as plain chat")
-        return "NONE"
+        if force_web:
+            log("ROUTE", "using the request verbatim as the search query")
+            return "WEB", user_text
+        return "NONE", None
     group = skills.parse_route(raw)
+    if force_web:
+        group = "WEB"
     log("ROUTE", f"{group} ({dt:.1f}s)")
     vlog("ROUTE", f"  raw router output: {raw!r}")
-    return group
+    search_query = None
+    if group == "WEB":
+        query_match = re.search(r"(?im)^\s*QUERY\s*:\s*(\S.*)$", raw)
+        if query_match:
+            search_query = query_match.group(1).strip().strip("\"'")
+            search_query = search_query[:300]
+        if not search_query:
+            search_query = user_text
+            log("ROUTE", "router did not provide a search query; using the request verbatim")
+        rationale = re.search(
+            r"(?im)^\s*RATIONALE\s*:\s*(\S.*)$", raw
+        )
+        if rationale:
+            vlog("WEB", f"search rationale: {rationale.group(1).strip()}")
+    return group, search_query
 
 
 def run_tags(tags, args):
@@ -1746,6 +1765,7 @@ def converse(args, mic, thr, stt, history, turn):
         t0 = time.monotonic()
         fast = None
         sentence_speaker = None
+        web_query = None
         local_reply = local_fact_reply(text)
         web_results = None
         if local_reply is not None:
@@ -1766,10 +1786,9 @@ def converse(args, mic, thr, stt, history, turn):
             if fast:
                 group = "FAST"
             elif needs_web_search(text):
-                log("ROUTE", "WEB (factual question, router skipped)")
-                group = "WEB"
+                group, web_query = route(text, args, history, force_web=True)
             else:
-                group = route(text, args, history)
+                group, web_query = route(text, args, history)
 
         if local_reply is not None:
             pass
@@ -1800,7 +1819,7 @@ def converse(args, mic, thr, stt, history, turn):
                 print(f"\n  Baymax: {web_acknowledgement}\n", flush=True)
                 speak(web_acknowledgement, args)
                 web_results = search_web(
-                    text, getattr(
+                    web_query or text, getattr(
                         args, "searxng_url", "http://localhost:8082/search"
                     ),
                     getattr(

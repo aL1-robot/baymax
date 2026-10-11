@@ -116,9 +116,13 @@ enabled, utterances are saved under `~/baymax_wavs`.
   attribution.
 - A lightweight LLM router also recognizes knowledge questions phrased without
   search keywords and sends those to web search, while keeping ordinary
-  conversation on the chat path.
+  conversation on the chat path. For web searches, the router turns the request
+  and recent context into a concise query before searching.
 
-These lookups require an internet connection. Searches first use the local
+These lookups require an internet connection. The LLM forms a focused search
+query from the request and recent conversation, preserving relevant names and
+constraints; Baymax still uses the original request and search results to form
+its answer. Searches first use the local
 OpenSERP service at `http://127.0.0.1:7000/mega/search`, trying Google, Bing,
 then DuckDuckGo in `any` mode with a five-result limit. In this mode OpenSERP
 tries engines in the listed order and returns the first one that responds.
@@ -160,6 +164,11 @@ Verbose mode for troubleshooting:
 ```bash
 python assistant.py --verbose
 ```
+
+For web lookups, verbose logs include the search query. When the LLM router
+selects web search, they also include its brief search rationale. High-confidence
+factual questions are forced through the router as well, so they get a focused
+query instead of searching the request verbatim.
 
 Press-to-talk mode without wake-word detection:
 

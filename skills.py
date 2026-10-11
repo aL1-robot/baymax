@@ -416,15 +416,32 @@ def abilities():
 
 
 # ----------------------------------------------------------- prompt builders
-def router_prompt():
+def router_prompt(force_web=False):
     """Stage 1: classify intent from the request and recent conversation."""
-    lines = [
-        "Classify the person's current intent using the request and recent "
-        "conversation. Interpret follow-ups in context, and choose the route "
-        "that best matches what the person wants now. Do not rely on fixed "
-        "phrases or assume a follow-up is unrelated. Answer with exactly one "
-        "word from this list:",
-    ]
+    if force_web:
+        lines = [
+            "The request requires a live factual lookup. Choose WEB and create "
+            "a concise search query that would find the requested information. "
+            "Use recent conversation to resolve references, preserving relevant "
+            "names, dates, locations, and other constraints. Do not answer the "
+            "question itself.",
+        ]
+    else:
+        lines = [
+            "Classify the person's current intent using the request and recent "
+            "conversation. Interpret follow-ups in context, and choose the route "
+            "that best matches what the person wants now. Do not rely on fixed "
+            "phrases or assume a follow-up is unrelated.",
+        ]
+    lines.append(
+        "For routes other than WEB, answer with exactly one route word. For "
+        "WEB, answer with WEB on the first line, `QUERY: <concise search "
+        "query>` on the second line, and `RATIONALE: <one brief sentence>` "
+        "on the third line. Preserve exact names and important constraints, "
+        "and remove conversational wording that does not help find results. "
+        "Give only a concise explanation of why an external lookup is needed; "
+        "do not provide private chain-of-thought."
+    )
     for name, g in GROUPS.items():
         lines.append(f"{name} - {g['about']}")
     lines.extend([
@@ -439,7 +456,7 @@ def router_prompt():
     lines.extend([
         "UNSUPPORTED - the person wants an action that is not available.",
         "UNCLEAR - the request cannot be understood.",
-        "Answer with the one word only.",
+        "Use the response format specified above.",
     ])
     return "\n".join(lines)
 
