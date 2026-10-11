@@ -72,7 +72,7 @@ import skills
 # ---------------------------------------------------------------- hardcoded
 SCRIPT_DIR = Path(__file__).resolve().parent
 HOME = Path.home()
-WHISPER_DIR = HOME / "models" / "faster-whisper-small.en"
+WHISPER_DIR = HOME / "models" / "faster-whisper-base.en"
 WAKE_CONFIG_NAMES = ("hey_baymax.json", "yow_baymax.json")
 load_dotenv(SCRIPT_DIR / ".env")
 
