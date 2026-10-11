@@ -119,13 +119,15 @@ enabled, utterances are saved under `~/baymax_wavs`.
   conversation on the chat path.
 
 These lookups require an internet connection. Searches first use the local
-OpenSERP service at `http://127.0.0.1:7000/mega/search`, querying DuckDuckGo,
-Bing, and Google in `any` mode with a five-result limit. If OpenSERP is
-unavailable or returns no usable results, Baymax tries Tavily when
-`TAVILY_API_KEY` is configured, then SearXNG, DuckDuckGo, and Wikipedia. Do not
-ask Baymax to search for private information. Search services can be
-unavailable or limit requests, and web results may be incomplete. Baymax will
-say when a search returns no useful results rather than making up an answer.
+OpenSERP service at `http://127.0.0.1:7000/mega/search`, trying Google, Bing,
+then DuckDuckGo in `any` mode with a five-result limit. In this mode OpenSERP
+tries engines in the listed order and returns the first one that responds.
+Brave is not currently a supported OpenSERP engine. If OpenSERP is unavailable
+or returns no usable results, Baymax tries Tavily when `TAVILY_API_KEY` is
+configured, then SearXNG, DuckDuckGo, and Wikipedia. Do not ask Baymax to search
+for private information. Search services can be unavailable or limit requests,
+and web results may be incomplete. Baymax will say when a search returns no
+useful results rather than making up an answer.
 
 Copy `.env.example` to `.env` and set your Tavily key there:
 
