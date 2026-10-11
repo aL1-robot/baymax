@@ -51,9 +51,11 @@ This gives you the `piper` binary in the extracted folder.
 
 ## Model files
 
-Place the wake-word and Whisper files in `~/models` so the scripts can find
-them automatically. By default, Piper uses the bundled `piper/piper`
-executable and the `baymax.onnx` voice model beside `assistant.py`.
+Place the wake-word and Whisper files in `~/models` if they are not beside
+`assistant.py`. By default, Baymax loads both included wake-word configs,
+`hey_baymax.json` and `yow_baymax.json`, and their corresponding TFLite models.
+Piper uses the bundled `piper/piper` executable and the `baymax.onnx` voice
+model beside `assistant.py`.
 
 Typical files include:
 
@@ -66,6 +68,20 @@ Example:
 ```bash
 mkdir -p ~/models
 ```
+
+Each wake phrase needs its own trained microWakeWord model and JSON config.
+By default, Baymax listens for both included phrases. To select different
+configs, pass `--wake-config` once per phrase:
+
+```bash
+python assistant.py \
+  --wake-config ~/models/hey_baymax.json \
+  --wake-config ~/models/yow_baymax.json
+```
+
+The configs can be stored elsewhere, but each config's `model` entry must
+point to its TFLite file relative to that config. If either included config is
+not beside the script, Baymax also looks for it in `~/models`.
 
 ## Running the assistant
 

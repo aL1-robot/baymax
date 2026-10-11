@@ -73,7 +73,7 @@ import skills
 SCRIPT_DIR = Path(__file__).resolve().parent
 HOME = Path.home()
 WHISPER_DIR = HOME / "models" / "faster-whisper-small.en"
-WAKE_CONFIG = SCRIPT_DIR / "hey_baymax.json"
+WAKE_CONFIG_NAMES = ("hey_baymax.json", "yow_baymax.json")
 load_dotenv(SCRIPT_DIR / ".env")
 
 # The rkllama CLI ignores the Modelfile SYSTEM line, so the persona lives here.
@@ -182,13 +182,29 @@ def vlog(tag, msg):
 
 
 # ------------------------------------------------------------------ helpers
-def find_wake_config():
-    candidates = [WAKE_CONFIG, HOME / "models" / "hey_baymax.json"]
-    for p in candidates:
-        if p.exists():
-            return p
-    raise SystemExit("wake word json not found. Looked in: "
-                     + ", ".join(str(c) for c in candidates))
+def find_wake_configs(config_paths=None):
+    if config_paths:
+        configs = [Path(path).expanduser() for path in config_paths]
+        missing = [path for path in configs if not path.is_file()]
+        if missing:
+            raise SystemExit("wake word config not found: "
+                             + ", ".join(str(path) for path in missing))
+        return configs
+
+    configs = []
+    missing = []
+    for name in WAKE_CONFIG_NAMES:
+        choices = [SCRIPT_DIR / name, HOME / "models" / name]
+        config = next((path for path in choices if path.is_file()), None)
+        if config is not None:
+            configs.append(config)
+        else:
+            missing.append(name)
+    if missing:
+        raise SystemExit("wake word config(s) not found: "
+                         + ", ".join(missing)
+                         + " (looked beside assistant.py and in ~/models)")
+    return configs
 
 
 def find_whisper_dir():
@@ -835,8 +851,8 @@ class _Null:
 _NULL = _Null()
 
 
-def reset_wake(mww, cutoff):
-    """Always return a BRAND-NEW wake model, never a reset one.
+def reset_wake(configs, cutoff):
+    """Always return BRAND-NEW wake models, never reset ones.
 
     The streaming model freezes mid-detection when a conversation starts (it
     isn't fed any audio during the chat). Resetting its variables in place did
@@ -845,12 +861,13 @@ def reset_wake(mww, cutoff):
     like at startup, and the tiny TFLite file loads in well under a second.
     """
     with contextlib.redirect_stdout(sys.stdout if VERBOSE else _NULL):
-        fresh = load_model(find_wake_config(), None, cutoff, "auto")
-    vlog("WAKE", "loaded a fresh wake model")
+        fresh = [load_model(config, None, cutoff, "auto")
+                 for config in configs]
+    vlog("WAKE", f"loaded {len(fresh)} fresh wake model(s)")
     return fresh
 
 
-def wait_for_wake(mic, mww, frontend, heartbeat):
+def wait_for_wake(mic, models, frontend, heartbeat):
     t_start = time.monotonic()
     last_hb = t_start
     hb_peak = hb_frames = hb_inf = 0
@@ -864,19 +881,20 @@ def wait_for_wake(mic, mww, frontend, heartbeat):
             feats = extract_feature_vectors(frontend.process_samples(chunk))
             hb_frames += len(feats)
             for feat in feats:
-                avg, hit = mww.process(feat)
-                if avg is None:
-                    continue
-                hb_inf += 1
-                hb_maxp = max(hb_maxp, avg)
-                if hit:
-                    return avg, time.monotonic() - t_start
+                for mww in models:
+                    avg, hit = mww.process(feat)
+                    if avg is None:
+                        continue
+                    hb_inf += 1
+                    hb_maxp = max(hb_maxp, avg)
+                    if hit:
+                        return avg, time.monotonic() - t_start
 
         now = time.monotonic()
         if heartbeat and now - last_hb >= heartbeat:
             log("WAKE", f"listening {now - t_start:5.0f}s | mic peak={hb_peak:5d} | "
                         f"frames={hb_frames:4d} | inferences={hb_inf:3d} | "
-                        f"max_prob={hb_maxp:.2f}/{mww.probability_cutoff}")
+                        f"max_prob={hb_maxp:.2f}")
             last_hb = now
             hb_peak = hb_frames = hb_inf = 0
             hb_maxp = 0.0
@@ -1791,6 +1809,9 @@ def main():
                         "going idle (0 = every request needs the wake word)")
     p.add_argument("--cutoff", type=float, default=None,
                    help="override wake word probability cutoff")
+    p.add_argument("--wake-config", action="append", dest="wake_configs",
+                   help="wake-word JSON config; repeat to listen for multiple "
+                        "wake words (each needs its own trained model)")
     p.add_argument("--threshold", type=float, default=None,
                    help="speech loudness threshold (default: auto-calibrated)")
     p.add_argument("--model", default="qwen3.5-2b", help="rkllama model name")
@@ -1823,13 +1844,15 @@ def main():
                  f"mode={'push-to-talk' if args.ptt else 'wake word'}")
     vlog("INIT", f"skill groups: {', '.join(skills.GROUPS)}")
 
-    mww = frontend = None
+    wake_models = wake_configs = frontend = None
     if not args.ptt:
-        cfg = find_wake_config()
-        vlog("INIT", f"wake word config: {cfg}")
+        wake_configs = find_wake_configs(args.wake_configs)
+        vlog("INIT", "wake word config(s): "
+             + ", ".join(str(config) for config in wake_configs))
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf if not VERBOSE else sys.stdout):
-            mww = load_model(cfg, None, args.cutoff, "auto")
+            wake_models = [load_model(config, None, args.cutoff, "auto")
+                           for config in wake_configs]
         frontend = MicroFrontend()  # one instance, reused for the whole run
 
     whisper_dir = find_whisper_dir()
@@ -1874,10 +1897,11 @@ def main():
                     for _ in range(IDLE_DEAF_CHUNKS):
                         mic.read()
                     mic.flush()
-                    mww = reset_wake(mww, args.cutoff)
+                    wake_models = reset_wake(wake_configs, args.cutoff)
                     frontend = MicroFrontend()
-                    log("WAKE", "idle - say 'Hey Baymax' to wake me")
-                    prob, waited = wait_for_wake(mic, mww, frontend, heartbeat)
+                    log("WAKE", "idle - waiting for a configured wake word")
+                    prob, waited = wait_for_wake(
+                        mic, wake_models, frontend, heartbeat)
                     log("WAKE", f"detected (prob {prob:.2f}) {waited:.1f}s after "
                                 f"going idle - speak now")
                     for _ in range(40):  # skip the tail of the wake word itself
