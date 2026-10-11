@@ -94,19 +94,31 @@ enabled, utterances are saved under `~/baymax_wavs`.
 
 - Time questions use the Orange Pi's local clock and configured timezone.
 - Word definitions use the free DictionaryAPI.dev endpoint.
-- Factual questions try your local SearXNG first, then DuckDuckGo and
+- Factual questions try Tavily first, then your local SearXNG, DuckDuckGo, and
   Wikipedia as fallbacks. Baymax gives sourced results to the local LLM to
   summarize and includes the search engine in its spoken attribution.
 - A lightweight LLM router also recognizes knowledge questions phrased without
   search keywords and sends those to web search, while keeping ordinary
   conversation on the chat path.
 
-These lookups require an internet connection. The spoken question is sent to
-your SearXNG instance first; only if it is unavailable or returns no usable
-results will the query be sent to DuckDuckGo or Wikipedia. Do not ask Baymax to
-search for private information. Search services can be unavailable or limit
-requests, and web results may be incomplete. Baymax will say when a search
-returns no useful results rather than making up an answer.
+These lookups require an internet connection. Search queries are sent to Tavily
+when `TAVILY_API_KEY` is configured, then to your SearXNG instance if Tavily is
+unavailable or returns no usable results. Without a Tavily key, SearXNG is tried
+first. DuckDuckGo and Wikipedia remain fallbacks if neither returns useful
+results. Do not ask Baymax to search for private information. Search services
+can be unavailable or limit requests, and web results may be incomplete.
+Baymax will say when a search returns no useful results rather than making up
+an answer.
+
+Copy `.env.example` to `.env` and set your Tavily key there:
+
+```bash
+cp .env.example .env
+# Edit .env and set TAVILY_API_KEY
+```
+
+The real shell environment takes precedence over values in `.env`. Keep `.env`
+private; it is excluded from version control.
 
 By default, Baymax uses `http://localhost:8082/search` and requests SearXNG's
 JSON output. Set another endpoint if needed:

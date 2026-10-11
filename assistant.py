@@ -39,6 +39,7 @@ import hashlib
 import inspect
 import io
 import json
+import os
 import queue
 import random
 import re
@@ -59,6 +60,7 @@ from collections import deque
 from pathlib import Path
 
 import numpy as np
+from dotenv import load_dotenv
 from pymicro_features import MicroFrontend
 from faster_whisper import WhisperModel
 
@@ -71,6 +73,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 HOME = Path.home()
 WHISPER_DIR = HOME / "models" / "faster-whisper-small.en"
 WAKE_CONFIG = SCRIPT_DIR / "hey_baymax.json"
+load_dotenv(SCRIPT_DIR / ".env")
 
 # The rkllama CLI ignores the Modelfile SYSTEM line, so the persona lives here.
 #PERSONA = (
@@ -1199,8 +1202,53 @@ def _plain_html(fragment):
 
 
 def search_web(query, searxng_url="http://localhost:8082/search"):
-    """Try SearXNG first, then DuckDuckGo and Wikipedia for sourced snippets."""
+    """Try Tavily, then SearXNG, DuckDuckGo, and Wikipedia for sourced snippets."""
     user_agent = {"User-Agent": "BaymaxAssistant/1.0 (local voice assistant)"}
+
+    tavily_api_key = os.environ.get("TAVILY_API_KEY")
+    if tavily_api_key:
+        try:
+            request = urllib.request.Request(
+                "https://api.tavily.com/search",
+                data=json.dumps({
+                    "api_key": tavily_api_key,
+                    "query": query,
+                    "search_depth": "basic",
+                    "max_results": 4,
+                }).encode("utf-8"),
+                headers={**user_agent, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=8) as response:
+                data = json.load(response)
+            entries = data.get("results", []) if isinstance(data, dict) else []
+            results = []
+            if isinstance(entries, list):
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    title = str(item.get("title") or "").strip()
+                    snippet = str(item.get("content") or "").strip()
+                    if not title or not snippet:
+                        continue
+                    results.append({
+                        "engine": "Tavily",
+                        "title": title[:200],
+                        "url": str(item.get("url") or "")[:500],
+                        "snippet": snippet[:600],
+                    })
+                    if len(results) >= 4:
+                        break
+            if results:
+                log("WEB", f"Tavily returned {len(results)} sourced result(s)")
+                return results
+            log("WEB", "Tavily returned no usable results; trying SearXNG")
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError,
+                UnicodeDecodeError) as error:
+            log("WEB", f"Tavily search failed: {error}; trying SearXNG")
+    else:
+        log("WEB", "TAVILY_API_KEY is not set; trying SearXNG")
+
     parsed = urlparse(searxng_url)
     params = parse_qs(parsed.query)
     params.update({"q": [query], "format": ["json"]})
