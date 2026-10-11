@@ -1432,12 +1432,20 @@ def ask_music_llm(history, user_text, args):
     raw = data["choices"][0]["message"]["content"]
     log("LLM", f"music search ready ({dt:.1f}s)")
     vlog("LLM", f"  music search HTTP {status}, {dt:.1f}s, raw={raw!r}")
-    search_reply, search_tags = skills.extract(strip_think(raw))
+    music_reply = strip_think(raw)
+    search_reply, search_tags = skills.extract(music_reply)
     query = next(
         (arg.strip() for tag, arg in search_tags
          if tag == "MUSIC_PLAY" and arg and arg.strip()),
         None,
     )
+    if not query:
+        assignment = re.search(
+            r"""(?im)^\s*MUSIC_PLAY\s*=\s*(["'])(.+?)\1\s*$""",
+            music_reply,
+        )
+        if assignment:
+            query = assignment.group(2).strip()
     if not query:
         reply = search_reply or "Which song or artist would you like me to look for?"
         history.extend([

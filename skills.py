@@ -465,7 +465,8 @@ def group_prompt(group):
             "Use the request and recent conversation to decide what music "
             "action is intended and, when playback is requested, form a useful "
             "YouTube Music search query. Put the query in plain text in the "
-            "MUSIC_PLAY tag.",
+            "MUSIC_PLAY tag, formatted exactly as [[MUSIC_PLAY:query]]. Do "
+            "not use assignment syntax like MUSIC_PLAY = \"query\".",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
