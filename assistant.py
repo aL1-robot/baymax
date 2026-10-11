@@ -1220,9 +1220,59 @@ def _plain_html(fragment):
     return " ".join("".join(parser.parts).split())
 
 
-def search_web(query, searxng_url="http://localhost:8082/search"):
-    """Try Tavily, then SearXNG, DuckDuckGo, and Wikipedia for sourced snippets."""
+def search_web(
+        query,
+        searxng_url="http://localhost:8082/search",
+        openserp_url="http://127.0.0.1:7000/mega/search"):
+    """Try OpenSERP first, then the existing search providers as fallbacks."""
     user_agent = {"User-Agent": "BaymaxAssistant/1.0 (local voice assistant)"}
+
+    parsed = urlparse(openserp_url)
+    params = parse_qs(parsed.query)
+    params.update({
+        "engines": ["duckduckgo,bing,google"],
+        "text": [query],
+        "mode": ["any"],
+        "limit": ["5"],
+    })
+    request_url = urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
+    try:
+        request = urllib.request.Request(request_url, headers=user_agent)
+        with urllib.request.urlopen(request, timeout=8) as response:
+            data = json.load(response)
+        entries = data.get("results", []) if isinstance(data, dict) else []
+        results = []
+        if isinstance(entries, list):
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "").strip()
+                extracted = item.get("extracted")
+                extracted_content = (
+                    extracted.get("content") if isinstance(extracted, dict) else ""
+                )
+                snippet = str(
+                    item.get("snippet")
+                    or extracted_content
+                    or ""
+                ).strip()
+                if not title or not snippet:
+                    continue
+                results.append({
+                    "engine": str(item.get("engine") or "OpenSERP").strip(),
+                    "title": title[:200],
+                    "url": str(item.get("url") or "")[:500],
+                    "snippet": snippet[:600],
+                })
+                if len(results) >= 5:
+                    break
+        if results:
+            log("WEB", f"OpenSERP returned {len(results)} sourced result(s)")
+            return results
+        log("WEB", "OpenSERP returned no usable results; trying existing search providers")
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError,
+            UnicodeDecodeError) as error:
+        log("WEB", f"OpenSERP search failed: {error}; trying existing search providers")
 
     tavily_api_key = os.environ.get("TAVILY_API_KEY")
     if tavily_api_key:
@@ -1752,7 +1802,11 @@ def converse(args, mic, thr, stt, history, turn):
                 web_results = search_web(
                     text, getattr(
                         args, "searxng_url", "http://localhost:8082/search"
-                    )
+                    ),
+                    getattr(
+                        args, "openserp_url",
+                        "http://127.0.0.1:7000/mega/search"
+                    ),
                 )
                 if web_results:
                     log("WEB", f"found {len(web_results)} source(s)")
@@ -1818,6 +1872,10 @@ def main():
     p.add_argument("--llm-url", default="http://localhost:8080/v1/chat/completions")
     p.add_argument("--searxng-url", default="http://localhost:8082/search",
                    help="SearXNG search endpoint (default: http://localhost:8082/search)")
+    p.add_argument("--openserp-url",
+                   default="http://127.0.0.1:7000/mega/search",
+                   help="OpenSERP mega-search endpoint "
+                        "(default: http://127.0.0.1:7000/mega/search)")
     p.add_argument("--piper", default=None,
                    help="Piper executable (default: ./piper/piper or PATH)")
     p.add_argument("--voice-model", default=str(SCRIPT_DIR / "baymax.onnx"),

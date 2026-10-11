@@ -110,21 +110,22 @@ enabled, utterances are saved under `~/baymax_wavs`.
 
 - Time questions use the Orange Pi's local clock and configured timezone.
 - Word definitions use the free DictionaryAPI.dev endpoint.
-- Factual questions try Tavily first, then your local SearXNG, DuckDuckGo, and
-  Wikipedia as fallbacks. Baymax gives sourced results to the local LLM to
-  summarize and includes the search engine in its spoken attribution.
+- Factual questions try your local OpenSERP service first, then Tavily,
+  SearXNG, DuckDuckGo, and Wikipedia as fallbacks. Baymax gives sourced results
+  to the local LLM to summarize and includes the search engine in its spoken
+  attribution.
 - A lightweight LLM router also recognizes knowledge questions phrased without
   search keywords and sends those to web search, while keeping ordinary
   conversation on the chat path.
 
-These lookups require an internet connection. Search queries are sent to Tavily
-when `TAVILY_API_KEY` is configured, then to your SearXNG instance if Tavily is
-unavailable or returns no usable results. Without a Tavily key, SearXNG is tried
-first. DuckDuckGo and Wikipedia remain fallbacks if neither returns useful
-results. Do not ask Baymax to search for private information. Search services
-can be unavailable or limit requests, and web results may be incomplete.
-Baymax will say when a search returns no useful results rather than making up
-an answer.
+These lookups require an internet connection. Searches first use the local
+OpenSERP service at `http://127.0.0.1:7000/mega/search`, querying DuckDuckGo,
+Bing, and Google in `any` mode with a five-result limit. If OpenSERP is
+unavailable or returns no usable results, Baymax tries Tavily when
+`TAVILY_API_KEY` is configured, then SearXNG, DuckDuckGo, and Wikipedia. Do not
+ask Baymax to search for private information. Search services can be
+unavailable or limit requests, and web results may be incomplete. Baymax will
+say when a search returns no useful results rather than making up an answer.
 
 Copy `.env.example` to `.env` and set your Tavily key there:
 
@@ -136,8 +137,14 @@ cp .env.example .env
 The real shell environment takes precedence over values in `.env`. Keep `.env`
 private; it is excluded from version control.
 
-By default, Baymax uses `http://localhost:8082/search` and requests SearXNG's
-JSON output. Set another endpoint if needed:
+OpenSERP's default endpoint can be changed with `--openserp-url`:
+
+```bash
+python assistant.py --openserp-url http://127.0.0.1:7000/mega/search
+```
+
+If OpenSERP is unavailable, Baymax uses `http://localhost:8082/search` and
+requests SearXNG's JSON output. Set another SearXNG endpoint if needed:
 
 ```bash
 python assistant.py --searxng-url http://localhost:8082/search
