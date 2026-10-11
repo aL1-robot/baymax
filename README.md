@@ -124,14 +124,20 @@ query from the request and recent conversation, preserving relevant names and
 constraints; Baymax still uses the original request and search results to form
 its answer. Searches first use the local
 OpenSERP service at `http://127.0.0.1:7000/mega/search`, trying Google, Bing,
-then DuckDuckGo in `any` mode with a five-result limit. In this mode OpenSERP
-tries engines in the listed order and returns the first one that responds.
-Brave is not currently a supported OpenSERP engine. If OpenSERP is unavailable
-or returns no usable results, Baymax tries Tavily when `TAVILY_API_KEY` is
-configured, then SearXNG, DuckDuckGo, and Wikipedia. Do not ask Baymax to search
-for private information. Search services can be unavailable or limit requests,
-and web results may be incomplete. Baymax will say when a search returns no
-useful results rather than making up an answer.
+querying all three in `balanced` mode, requesting extracted text from the top
+two pages and up to five results. This lets Baymax compare results across
+engines and use page content when available, rather than relying only on a
+single engine's snippets. Brave is not currently a supported OpenSERP engine.
+If OpenSERP is unavailable or returns no usable results, Baymax tries Tavily
+when `TAVILY_API_KEY` is configured, then SearXNG, DuckDuckGo, and Wikipedia.
+Do not ask Baymax to search for private information. Search services can be
+unavailable or limit requests, and web results may be incomplete.
+
+Baymax passes the returned titles, text, URLs, and engine names to the answer
+model. With `--verbose`, it logs the query and the evidence text sent to that
+model. The model is instructed to use only information supported by retrieved
+result text, and to say “The search results do not say anything more about
+that” when the text does not contain enough information to answer.
 
 Copy `.env.example` to `.env` and set your Tavily key there:
 
