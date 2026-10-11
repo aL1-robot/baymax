@@ -12,6 +12,7 @@ faster-whisper
 piper-tts
 yt-dlp
 ytmusicapi
+python-dotenv
 
 #
 spidev
