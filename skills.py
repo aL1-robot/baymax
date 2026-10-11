@@ -32,10 +32,10 @@ The fast matchers double as a safety net when the model forgets a tag.
 Brightness is a PERCENTAGE: 100% = MAX_BRIGHTNESS (0.4) of the strip's real
 output. Nothing the model says can go above that.
 
-Add a skill to an existing group: write a function, add one line to SKILLS and
-one entry to FAST_REPLIES (so the fast path has something to say).
-Add a new group: add an entry to GROUPS (description + examples + "ability"
-phrase Baymax can say out loud), then SKILLS lines that name it.
+Add a skill to an existing group: write a function and add one line to SKILLS.
+For a light command handled by the fast path, also add a FAST_REPLIES entry.
+Add a new group: add an entry to GROUPS (description and, when appropriate, an
+"ability" phrase Baymax can say out loud), then SKILLS lines that name it.
 
 Test without any voice:
     python skills.py on | off | up | down | 40      (40 = 40 percent)
@@ -325,12 +325,8 @@ def _convo_fast(text):
 
 
 # ------------------------------------------------------------- the index
-# Small models follow examples far better than rules. In each example list, a
-# reply WITH a tag is a positive example; a reply without one is a negative
-# example (the router also learns from these automatically).
-# Kept short on purpose: every example is prefill time on every chat turn.
-# Obvious commands (on / off / brighter / dimmer / percent) never reach the LLM
-# anyway, they are handled by the fast path.
+# Light examples help the model produce the correct tags. Other intents are
+# classified from the request and recent conversation rather than fixed examples.
 LIGHT_EXAMPLES = [
     ("It's too dark in here.",
      "I turned on the light for you. [[LIGHT_ON]]"),
@@ -344,19 +340,6 @@ LIGHT_EXAMPLES = [
      "I am sorry to hear that. On a scale of 1 to 10, how bad is the pain?"),
 ]
 
-CONVO_EXAMPLES = [
-    ("That's all, thank you.",
-     "You are welcome. I will be here if you need me. [[END_CONVERSATION]]"),
-    ("Stop listening.",
-     "Okay. Going quiet now. Say my name when you need me. [[END_CONVERSATION]]"),
-    ("Goodbye Baymax.",
-     "Goodbye. I am glad I could help. [[END_CONVERSATION]]"),
-    ("How are you today?",
-     "I am functioning well. How are you feeling?"),
-]
-
-
-
 # "about"   : read by the router (what requests belong to this group)
 # "ability" : short phrase Baymax can say out loud when he lists what he can do
 #             (leave it out for groups that shouldn't be mentioned)
@@ -369,15 +352,12 @@ GROUPS = {
         "fast": _light_fast,
     },
     "CONVERSATION": {
-        "about": "the person wants to end the chat or stop listening "
-                 "(goodbye, that's all, stop listening, be quiet)",
-        "examples": CONVO_EXAMPLES,
+        "about": "the person wants to end the current conversation",
         "fast": _convo_fast,
     },
     "MUSIC": {
-        "about": "search YouTube Music and start playback when the person wants "
-                 "to hear music now; use conversation context to resolve what "
-                 "they want played",
+        "about": "the person wants music played; use their request and "
+                 "conversation context to determine what they mean",
         "ability": "play music from YouTube Music",
         "examples": [],
     },
@@ -400,9 +380,6 @@ SKILLS = {
     "MUSIC_PLAY": ("MUSIC", "search YouTube Music for a song query",
                    play_youtube_music, "QUERY"),
 }
-
-ROUTER_EXAMPLES_PER_GROUP = 3
-ROUTER_NEGATIVES = 4
 
 # Canned replies for obvious commands (no LLM call needed). Every tag that a
 # fast matcher can return needs an entry here. {arg} is filled in for tags
@@ -440,48 +417,27 @@ def abilities():
 
 # ----------------------------------------------------------- prompt builders
 def router_prompt():
-    """Stage 1: the tiny index prompt. Names and descriptions only."""
+    """Stage 1: classify intent from the request and recent conversation."""
     lines = [
-        "Decide which ability the person's request needs. First check whether "
-        "they want you to perform one of the listed abilities. If so, choose "
-        "that ability, even when the request is casual or phrased as a "
-        "question. Only choose NONE when no listed action or outside "
-        "information is requested. Answer with exactly one word from this list:",
+        "Classify the person's current intent using the request and recent "
+        "conversation. Interpret follow-ups in context, and choose the route "
+        "that best matches what the person wants now. Do not rely on fixed "
+        "phrases or assume a follow-up is unrelated. Answer with exactly one "
+        "word from this list:",
     ]
     for name, g in GROUPS.items():
         lines.append(f"{name} - {g['about']}")
     lines.extend([
-        "WEB - retrieve and summarize information from outside sources. Use "
-        "this for questions, requested lists, facts, explanations, comparisons, "
-        "or recommendations, including music information. Choose WEB when the "
-        "person wants information about music; choose MUSIC only when they "
-        "want music playback.",
+        "WEB - the person wants information that should be retrieved from "
+        "outside sources.",
         "NONE - ordinary conversation, personal feelings, or opinions that "
-        "need no action and no outside facts. A request to perform a listed "
-        "ability is never NONE.",
+        "do not need outside information or an ability.",
     ])
-    lines.append("UNSUPPORTED - asks you to DO something that is not in the "
-                 "list above (set a timer, send a message, open a door).")
-    lines.append("UNCLEAR - garbled, cut off, or not a real sentence")
-    lines.append("Examples:")
-    negatives = []
-    for name, g in GROUPS.items():
-        shown = 0
-        for user, reply in g["examples"]:
-            if "[[" in reply:
-                if shown < ROUTER_EXAMPLES_PER_GROUP:
-                    lines.append(f'"{user}" -> {name}')
-                    shown += 1
-            else:
-                negatives.append(user)
-    for user in negatives[:ROUTER_NEGATIVES]:
-        lines.append(f'"{user}" -> NONE')
-    lines.append('"Do you know the Filipino singer named Adi?" -> WEB')
-    lines.append('"Tell me why the sky looks blue." -> WEB')
-    lines.append('"I had a long day." -> NONE')
-    lines.append('"Set a timer for ten minutes." -> UNSUPPORTED')
-    lines.append('"Uh the cat purple the and." -> UNCLEAR')
-    lines.append("Answer with the one word only.")
+    lines.extend([
+        "UNSUPPORTED - the person wants an action that is not available.",
+        "UNCLEAR - the request cannot be understood.",
+        "Answer with the one word only.",
+    ])
     return "\n".join(lines)
 
 
@@ -503,9 +459,10 @@ def group_prompt(group):
     elif group == "MUSIC":
         lines.insert(
             1,
-            "To play music, determine the best YouTube Music search query based on "
-            "the person's request and conversation context. Write the query in plain text (no URL encoding). "
-            "If you are choosing a song for the person, include the specific song title in your search query.",
+            "Use the request and recent conversation to decide what music "
+            "action is intended and, when playback is requested, form a useful "
+            "YouTube Music search query. Put the query in plain text in the "
+            "MUSIC_PLAY tag.",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
