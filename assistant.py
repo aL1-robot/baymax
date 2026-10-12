@@ -1885,11 +1885,14 @@ def converse(args, mic, thr, stt, history, turn):
                 )
                 if web_results:
                     log("WEB", f"found {len(web_results)} source(s)")
-                for item in web_results:
-                    source = f"  Source ({item.get('engine', 'unknown')}): {item['title']}"
-                    if item.get("url"):
-                        source += f" - {item['url']}"
-                    print(source, flush=True)
+                    for item in web_results:
+                        source = (
+                            f"  Source ({item.get('engine', 'unknown')}): "
+                            f"{item['title']}"
+                        )
+                        if item.get("url"):
+                            source += f" - {item['url']}"
+                        print(source, flush=True)
                     # Buffer web replies so unsupported list items can be
                     # rejected before any generated claims are spoken.
                     reply = ask_llm(history, text, args, group, web_results)
