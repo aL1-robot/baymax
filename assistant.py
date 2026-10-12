@@ -28,6 +28,7 @@ Usage:
     python assistant.py                  # wake word mode, short logs
     python assistant.py --verbose        # detailed logs for debugging
     python assistant.py --ptt            # no wake word, press Enter to talk
+    python assistant.py --chat           # type requests in the terminal
     python assistant.py --followup 12    # seconds to wait for a follow-up (0 = off)
     python assistant.py --save-wavs      # also save each utterance to ~/baymax_wavs
 """
@@ -478,7 +479,9 @@ def _speak_audio(text, args):
 
 
 def speak(text, args):
-    """Synthesize and play one reply."""
+    """Synthesize and play one reply unless running in terminal chat mode."""
+    if args.chat:
+        return
     _speak_audio(text, args)
 
 
@@ -1754,25 +1757,35 @@ def converse(args, mic, thr, stt, history, turn):
     misses = 0  # misunderstood turns in a row
     junk = 0    # noise-only transcripts in a row
     while True:
-        pcm = record_utterance(mic, thr, max_wait=wait)
-        if pcm is None:
-            return "no speech"
-        if args.save_wavs:
-            log("REC", f"saved to {save_wav(pcm, turn)}")
-        text, conf = transcribe(stt, pcm)
+        if args.chat:
+            try:
+                text = input("\n  You:    ").strip()
+            except EOFError:
+                print(flush=True)
+                return "input closed"
+            if not text:
+                continue
+            conf = None
+        else:
+            pcm = record_utterance(mic, thr, max_wait=wait)
+            if pcm is None:
+                return "no speech"
+            if args.save_wavs:
+                log("REC", f"saved to {save_wav(pcm, turn)}")
+            text, conf = transcribe(stt, pcm)
 
-        # Whisper "You" / "Thank you" / empty = it heard noise, not a request.
-        # Don't count it as a misunderstanding; just keep listening.
-        if is_junk(text):
-            junk += 1
-            log("STT", f"ignoring noise ({text!r}) [{junk}/{MAX_JUNK}]")
-            if junk >= MAX_JUNK:
-                return "only noise"
-            mic.flush()
-            continue
-        junk = 0
+            # Whisper "You" / "Thank you" / empty = it heard noise, not a request.
+            # Don't count it as a misunderstanding; just keep listening.
+            if is_junk(text):
+                junk += 1
+                log("STT", f"ignoring noise ({text!r}) [{junk}/{MAX_JUNK}]")
+                if junk >= MAX_JUNK:
+                    return "only noise"
+                mic.flush()
+                continue
+            junk = 0
 
-        print(f"\n  You:    {text}\n", flush=True)
+            print(f"\n  You:    {text}\n", flush=True)
 
         t0 = time.monotonic()
         fast = None
@@ -1789,7 +1802,7 @@ def converse(args, mic, thr, stt, history, turn):
             ])
             del history[:-12]
             log("FACT", "answered using local time or dictionary API")
-        elif looks_garbled(conf):
+        elif not args.chat and looks_garbled(conf):
             log("STT", f"not confident (logprob={conf['logprob']}, "
                        f"no_speech={conf['no_speech']}), asking to repeat")
             group = "UNCLEAR"
@@ -1858,7 +1871,8 @@ def converse(args, mic, thr, stt, history, turn):
                     ])
                     del history[:-12]
             else:
-                if group == "NONE" and not skills.fallback(text):
+                if (not args.chat and group == "NONE"
+                        and not skills.fallback(text)):
                     sentence_speaker = SentenceSpeaker(args)
                 reply = ask_llm(
                     history, text, args, group,
@@ -1873,6 +1887,8 @@ def converse(args, mic, thr, stt, history, turn):
         if skills.state["end_conversation"]:
             skills.state["end_conversation"] = False
             return "ended by you"
+        if args.chat:
+            continue
         if args.followup <= 0:
             return "follow-up disabled"
 
@@ -1888,6 +1904,8 @@ def main():
     p.add_argument("--alsa", default="plughw:3,0")
     p.add_argument("--ptt", action="store_true",
                    help="push-to-talk: press Enter instead of using the wake word")
+    p.add_argument("--chat", action="store_true",
+                   help="type requests in the terminal instead of using voice")
     p.add_argument("--verbose", action="store_true",
                    help="detailed logs (also prints wake word status every 2s)")
     p.add_argument("--followup", type=float, default=8.0,
@@ -1928,14 +1946,15 @@ def main():
     args = p.parse_args()
     VERBOSE = args.verbose
     heartbeat = args.heartbeat or (2.0 if args.verbose else 0.0)
-    initialize_voice_cache(args)
+    if not args.chat:
+        initialize_voice_cache(args)
 
     vlog("INIT", f"python {sys.version.split()[0]}, mic={args.alsa}, "
-                 f"mode={'push-to-talk' if args.ptt else 'wake word'}")
+                 f"mode={'chat' if args.chat else 'push-to-talk' if args.ptt else 'wake word'}")
     vlog("INIT", f"skill groups: {', '.join(skills.GROUPS)}")
 
     wake_models = wake_configs = frontend = None
-    if not args.ptt:
+    if not args.chat and not args.ptt:
         wake_configs = find_wake_configs(args.wake_configs)
         vlog("INIT", "wake word config(s): "
              + ", ".join(str(config) for config in wake_configs))
@@ -1945,16 +1964,19 @@ def main():
                            for config in wake_configs]
         frontend = MicroFrontend()  # one instance, reused for the whole run
 
-    whisper_dir = find_whisper_dir()
-    log("INIT", "loading speech-to-text model...")
-    t0 = time.monotonic()
-    stt = WhisperModel(str(whisper_dir), device="cpu",
-                       compute_type="int8", cpu_threads=6)
-    vlog("INIT", f"Whisper from {whisper_dir} loaded in {time.monotonic() - t0:.1f}s")
+    stt = mic = thr = None
+    if not args.chat:
+        whisper_dir = find_whisper_dir()
+        log("INIT", "loading speech-to-text model...")
+        t0 = time.monotonic()
+        stt = WhisperModel(str(whisper_dir), device="cpu",
+                           compute_type="int8", cpu_threads=6)
+        vlog("INIT", f"Whisper from {whisper_dir} loaded in "
+                     f"{time.monotonic() - t0:.1f}s")
 
-    mic = Mic(args.alsa)
-    mic.start()
-    thr = args.threshold or calibrate(mic)
+        mic = Mic(args.alsa)
+        mic.start()
+        thr = args.threshold or calibrate(mic)
     history = []
     turn = 0
 
@@ -1974,7 +1996,9 @@ def main():
             turn += 1
             try:
                 vlog("TURN", f"===== conversation {turn} =====")
-                if args.ptt:
+                if args.chat:
+                    pass
+                elif args.ptt:
                     mic.flush()
                     input("\nPress Enter, then speak... ")
                     mic.flush()
@@ -2015,11 +2039,13 @@ def main():
                 except Exception as speech_error:
                     log("ERROR", f"could not speak the failure notice: {speech_error}")
                 time.sleep(1)
-                mic.restart()
+                if mic:
+                    mic.restart()
     except KeyboardInterrupt:
         log("INIT", "stopped.")
     finally:
-        mic.stop()
+        if mic:
+            mic.stop()
 
 
 if __name__ == "__main__":

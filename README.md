@@ -92,6 +92,20 @@ played through the default ALSA output:
 python assistant.py
 ```
 
+For terminal-only testing, use `--chat` to type requests and read replies
+directly in the terminal:
+
+```bash
+python assistant.py --chat
+```
+
+Chat mode uses the same assistant, web search, and skill handling as voice mode,
+but skips wake-word detection, microphone input, speech recognition, and audio
+playback. It does not require the wake-word or Whisper model files or Piper.
+Conversation context is kept between typed requests and reset when you ask
+Baymax to end the conversation. Press `Ctrl-C` or send end-of-file (`Ctrl-D`)
+to exit.
+
 Ordinary chat replies use the LLM server's OpenAI-compatible streaming API.
 Baymax starts Piper speech as each complete sentence arrives, while the model
 continues generating the rest of the reply. Web searches, music requests, and
