@@ -124,10 +124,9 @@ enabled, utterances are saved under `~/baymax_wavs`.
 
 - Time questions use the Orange Pi's local clock and configured timezone.
 - Word definitions use the free DictionaryAPI.dev endpoint.
-- Factual questions try your local OpenSERP service first, then Tavily,
-  SearXNG, DuckDuckGo, and Wikipedia as fallbacks. Baymax gives sourced results
-  to the local LLM to summarize and includes the search engine in its spoken
-  attribution.
+- Factual questions try the local search-answer service first, then OpenSERP,
+  Tavily, SearXNG, DuckDuckGo, and Wikipedia as fallbacks. Baymax gives the
+  returned answer or sourced results to the local LLM to summarize.
 - A lightweight LLM router also recognizes knowledge questions phrased without
   search keywords and sends those to web search, while keeping ordinary
   conversation on the chat path. For web searches, the router turns the request
@@ -136,8 +135,11 @@ enabled, utterances are saved under `~/baymax_wavs`.
 These lookups require an internet connection. The LLM forms a focused search
 query from the request and recent conversation, preserving relevant names and
 constraints; Baymax still uses the original request and search results to form
-its answer. Searches first use the local
-OpenSERP service at `http://127.0.0.1:7000/mega/search`, trying Google, Bing,
+its answer. Searches first use the local answer service at
+`http://localhost:8001/search`, passing the search query as the `q` parameter.
+It expects a JSON response containing an `answer` string. If the service is
+unavailable or returns no answer, Baymax falls back to OpenSERP at
+`http://127.0.0.1:7000/mega/search`, trying Google, Bing,
 querying all three in `balanced` mode, requesting extracted text from the top
 two pages and up to five results. This lets Baymax compare results across
 engines and use page content when available, rather than relying only on a
@@ -163,7 +165,13 @@ cp .env.example .env
 The real shell environment takes precedence over values in `.env`. Keep `.env`
 private; it is excluded from version control.
 
-OpenSERP's default endpoint can be changed with `--openserp-url`:
+The local search-answer endpoint can be changed with `--search-url`:
+
+```bash
+python assistant.py --search-url http://localhost:8001/search
+```
+
+OpenSERP's fallback endpoint can be changed with `--openserp-url`:
 
 ```bash
 python assistant.py --openserp-url http://127.0.0.1:7000/mega/search

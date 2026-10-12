@@ -1225,11 +1225,38 @@ def _plain_html(fragment):
 
 def search_web(
         query,
+        search_url="http://localhost:8001/search",
         searxng_url="http://localhost:8082/search",
         openserp_url="http://127.0.0.1:7000/mega/search"):
-    """Try OpenSERP first, then the existing search providers as fallbacks."""
+    """Try the local answer service first, then existing search providers."""
     log("WEB", f"search query: {query}")
     user_agent = {"User-Agent": "BaymaxAssistant/1.0 (local voice assistant)"}
+
+    parsed = urlparse(search_url)
+    params = parse_qs(parsed.query)
+    params["q"] = [query]
+    request_url = urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
+    try:
+        request = urllib.request.Request(request_url, headers=user_agent)
+        with urllib.request.urlopen(request, timeout=8) as response:
+            data = json.load(response)
+        answer = data.get("answer") if isinstance(data, dict) else None
+        answer = answer.strip() if isinstance(answer, str) else ""
+        if answer:
+            log("WEB", "local search service returned an answer")
+            return [{
+                "engine": "Local search",
+                "title": "Local search answer",
+                "url": "",
+                "snippet": answer[:2500],
+            }]
+        log(
+            "WEB",
+            "local search service returned no answer; trying existing providers",
+        )
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError,
+            UnicodeDecodeError) as error:
+        log("WEB", f"local search failed: {error}; trying existing providers")
 
     parsed = urlparse(openserp_url)
     params = parse_qs(parsed.query)
@@ -1844,7 +1871,11 @@ def converse(args, mic, thr, stt, history, turn):
                 print(f"\n  Baymax: {web_acknowledgement}\n", flush=True)
                 speak(web_acknowledgement, args)
                 web_results = search_web(
-                    web_query or text, getattr(
+                    web_query or text,
+                    getattr(
+                        args, "search_url", "http://localhost:8001/search"
+                    ),
+                    getattr(
                         args, "searxng_url", "http://localhost:8082/search"
                     ),
                     getattr(
@@ -1854,12 +1885,11 @@ def converse(args, mic, thr, stt, history, turn):
                 )
                 if web_results:
                     log("WEB", f"found {len(web_results)} source(s)")
-                    for item in web_results:
-                        print(
-                            f"  Source ({item.get('engine', 'unknown')}): "
-                            f"{item['title']} - {item['url']}",
-                            flush=True,
-                        )
+                for item in web_results:
+                    source = f"  Source ({item.get('engine', 'unknown')}): {item['title']}"
+                    if item.get("url"):
+                        source += f" - {item['url']}"
+                    print(source, flush=True)
                     # Buffer web replies so unsupported list items can be
                     # rejected before any generated claims are spoken.
                     reply = ask_llm(history, text, args, group, web_results)
@@ -1926,6 +1956,9 @@ def main():
                    default="http://127.0.0.1:7000/mega/search",
                    help="OpenSERP mega-search endpoint "
                         "(default: http://127.0.0.1:7000/mega/search)")
+    p.add_argument("--search-url", default="http://localhost:8001/search",
+                   help="local answer search endpoint "
+                        "(default: http://localhost:8001/search)")
     p.add_argument("--piper", default=None,
                    help="Piper executable (default: ./piper/piper or PATH)")
     p.add_argument("--voice-model", default=str(SCRIPT_DIR / "baymax.onnx"),
