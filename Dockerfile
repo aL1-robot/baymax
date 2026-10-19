@@ -11,6 +11,7 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         libasound2 \
+        libasound2-plugins \
         libespeak-ng1 \
         libgomp1 \
         mpv \
