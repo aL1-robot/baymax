@@ -43,6 +43,7 @@ Test without any voice:
     python skills.py fast "turn the lamp on"        (try the fast path)
 """
 
+import os
 import random
 import re
 import shutil
@@ -237,10 +238,19 @@ def play_youtube_music_result(candidate):
         [candidate["title"], *[name for name in candidate["artists"] if name]]
     )
     print(f"  Playing from YouTube Music: {title} (Press 'C' to skip)", flush=True)
+    command = [
+        player,
+        "--no-video",
+        "--no-terminal",
+        "--msg-level=all=no,ao=warn",
+    ]
+    output_device = os.environ.get("ALSA_OUTPUT_DEVICE")
+    if output_device:
+        command.extend(["--ao=alsa", f"--audio-device=alsa/{output_device}"])
+    command.append(audio_url)
     proc = subprocess.Popen(
-        [player, "--no-video", "--no-terminal", "--really-quiet", audio_url],
+        command,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
     )
     
     import sys
@@ -269,7 +279,7 @@ def play_youtube_music_result(candidate):
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     
     proc.wait()
-    if proc.returncode and proc.returncode > 0:
+    if proc.returncode:
         raise RuntimeError(f"mpv exited with status {proc.returncode}")
     return title
 

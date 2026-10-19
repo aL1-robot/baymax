@@ -79,6 +79,7 @@ ALSA_OUTPUT_DEVICE=plughw:0,0
 
 When an explicit output device is configured, Baymax converts Piper audio to
 48 kHz stereo before playback for compatibility with board audio devices.
+YouTube Music playback uses the same ALSA device setting for `mpv`.
 
 Compose passes `/dev/spidev4.1` through for the light skill, matching the SPI
 bus and device configured in `skills.py`. Enable that SPI device on the host
