@@ -480,14 +480,18 @@ def group_prompt(group):
         lines.insert(
             1,
             "Use the request and recent conversation to decide what music "
-            "action is intended and, when playback is requested, form a useful "
-            "YouTube Music search query. Put the query in plain text in the "
-            "MUSIC_PLAY tag, formatted exactly as [[MUSIC_PLAY:query]]. Do "
-            "not use assignment syntax like MUSIC_PLAY = \"query\".",
+            "action is intended. When playback is requested without a song, "
+            "artist, or genre preference, choose a genre such as pop and search "
+            "for that genre of music; playback uses the first search result. "
+            "Put actual search terms in the MUSIC_PLAY tag, formatted as "
+            "[[MUSIC_PLAY:<search terms>]]. Never use placeholder words like "
+            "\"QUERY\" or \"search terms\" as the search terms, and do not use "
+            "assignment syntax like MUSIC_PLAY = \"query\".",
         )
     for tag, (grp, desc, _, arg) in SKILLS.items():
         if grp == group:
-            shown = f"[[{tag}:{arg}]]" if arg else f"[[{tag}]]"
+            shown = (f"[[{tag}:<search terms>]]" if tag == "MUSIC_PLAY"
+                     else f"[[{tag}:{arg}]]" if arg else f"[[{tag}]]")
             lines.append(f"- {shown} = {desc}")
     if group != "MUSIC" and g.get("examples"):
         lines.append("Examples:")
