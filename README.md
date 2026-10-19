@@ -69,10 +69,19 @@ device, update the Compose command, for example:
 command: ["python", "assistant.py", "--alsa", "default"]
 ```
 
-For the SPI LED controller, enable the commented `/dev/spidev4.1` device
-mapping in `docker-compose.yml` (adjust the device path if your board differs).
-The container does not request privileged mode. Audio and SPI access require
-the host devices to exist and be accessible to Docker.
+Speech output uses ALSA's default device unless `ALSA_OUTPUT_DEVICE` is set in
+`.env`. If Piper runs but there is no sound, find the host playback device with
+`aplay -l` and set the matching ALSA device, for example:
+
+```dotenv
+ALSA_OUTPUT_DEVICE=plughw:0,0
+```
+
+Compose passes `/dev/spidev4.1` through for the light skill, matching the SPI
+bus and device configured in `skills.py`. Enable that SPI device on the host
+and adjust the mapping if the board uses a different device path. The
+container does not request privileged mode. Audio and SPI access require the
+host devices to exist and be accessible to Docker.
 
 Stop the service with Ctrl+C or `docker compose down`. To run in push-to-talk
 mode instead, add `"--ptt"` to the command array in `docker-compose.yml`.

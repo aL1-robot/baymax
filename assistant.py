@@ -266,6 +266,14 @@ def _audio_tools(args):
     return model, piper, player
 
 
+def _player_command(player, args, audio_path):
+    command = [player, "-q"]
+    if args.player_device:
+        command.extend(["-D", args.player_device])
+    command.append(str(audio_path))
+    return command
+
+
 def _has_audio_frames(path):
     try:
         with wave.open(str(path), "rb") as wav_file:
@@ -459,7 +467,7 @@ def _speak_audio(text, args):
     try:
         playback_started = time.monotonic()
         played = subprocess.run(
-            [player, "-q", str(audio_path)],
+            _player_command(player, args, audio_path),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             check=False,
@@ -621,7 +629,7 @@ class SentenceSpeaker:
                     log("TTS", "playing reply")
                     playback_started = time.monotonic()
                     played = subprocess.run(
-                        [player, "-q", str(audio_path)],
+                        _player_command(player, self.args, audio_path),
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.PIPE,
                         check=False,
@@ -1941,6 +1949,9 @@ def main():
                    help="silence between Piper sentences, in seconds (default: 0.2)")
     p.add_argument("--player", default="aplay",
                    help="WAV audio player (default: aplay)")
+    p.add_argument("--player-device",
+                   default=os.getenv("ALSA_OUTPUT_DEVICE") or None,
+                   help="ALSA playback device for aplay (or ALSA_OUTPUT_DEVICE)")
     p.add_argument("--voice-cache", default=str(SCRIPT_DIR / "voice_cache"),
                    help="folder for prebuilt skill reply audio")
     p.add_argument("--heartbeat", type=float, default=0.0,

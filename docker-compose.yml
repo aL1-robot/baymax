@@ -13,12 +13,12 @@ services:
     environment:
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       TZ: ${TZ:-Etc/UTC}
+      ALSA_OUTPUT_DEVICE: ${ALSA_OUTPUT_DEVICE:-}
     volumes:
       - ${HOME}/models:/root/models:ro
       - ./voice_cache:/app/voice_cache
       - /dev/snd:/dev/snd
     device_cgroup_rules:
       - "c 116:* rmw"
-    # Enable this mapping on boards with the configured SPI LED controller:
-    # devices:
-    #   - /dev/spidev4.1:/dev/spidev4.1
+    devices:
+      - /dev/spidev4.1:/dev/spidev4.1
