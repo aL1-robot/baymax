@@ -40,6 +40,7 @@ import hashlib
 import inspect
 import io
 import json
+import math
 import os
 import queue
 import random
@@ -274,6 +275,37 @@ def _player_command(player, args, audio_path):
     return command
 
 
+def _convert_playback_wav(source_path, target_path):
+    with wave.open(str(source_path), "rb") as source:
+        if source.getsampwidth() != 2 or source.getnchannels() not in (1, 2):
+            raise ValueError(
+                f"unsupported playback WAV format: {source.getnchannels()} "
+                f"channels, {source.getsampwidth() * 8}-bit"
+            )
+        sample_rate = source.getframerate()
+        pcm = np.frombuffer(source.readframes(source.getnframes()),
+                            dtype=np.int16)
+        pcm = pcm.reshape(-1, source.getnchannels()).astype(np.float32)
+
+    if sample_rate != 48000:
+        from scipy.signal import resample_poly
+
+        divisor = math.gcd(48000, sample_rate)
+        pcm = resample_poly(
+            pcm, 48000 // divisor, sample_rate // divisor, axis=0
+        )
+    if pcm.shape[1] == 1:
+        pcm = np.repeat(pcm, 2, axis=1)
+    pcm = np.rint(np.clip(pcm, -32768, 32767)).astype(np.int16)
+
+    with wave.open(str(target_path), "wb") as target:
+        target.setnchannels(2)
+        target.setsampwidth(2)
+        target.setframerate(48000)
+        target.writeframes(pcm.tobytes())
+    return target_path
+
+
 def _has_audio_frames(path):
     try:
         with wave.open(str(path), "rb") as wav_file:
@@ -464,10 +496,19 @@ def _speak_audio(text, args):
             raise
 
     log("TTS", "playing reply")
+    playback_temporary = None
+    playback_path = audio_path
     try:
+        if args.player_device:
+            playback_temporary = tempfile.TemporaryDirectory(
+                prefix="baymax-playback-"
+            )
+            playback_path = _convert_playback_wav(
+                audio_path, Path(playback_temporary.name) / "playback.wav"
+            )
         playback_started = time.monotonic()
         played = subprocess.run(
-            _player_command(player, args, audio_path),
+            _player_command(player, args, playback_path),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             check=False,
@@ -481,6 +522,8 @@ def _speak_audio(text, args):
         vlog("TTS", f"audio playback finished in "
                     f"{time.monotonic() - playback_started:.2f}s")
     finally:
+        if playback_temporary:
+            playback_temporary.cleanup()
         if temporary:
             temporary.cleanup()
 
@@ -614,6 +657,7 @@ class SentenceSpeaker:
                 audio_path, temporary, sentence_index, sentence_text = item
                 if self.error is not None:
                     continue
+                playback_temporary = None
                 try:
                     started = time.monotonic()
                     self.started_sentences += 1
@@ -628,8 +672,17 @@ class SentenceSpeaker:
                     )
                     log("TTS", "playing reply")
                     playback_started = time.monotonic()
+                    playback_path = audio_path
+                    if self.args.player_device:
+                        playback_temporary = tempfile.TemporaryDirectory(
+                            prefix="baymax-playback-"
+                        )
+                        playback_path = _convert_playback_wav(
+                            audio_path,
+                            Path(playback_temporary.name) / "playback.wav",
+                        )
                     played = subprocess.run(
-                        _player_command(player, self.args, audio_path),
+                        _player_command(player, self.args, playback_path),
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.PIPE,
                         check=False,
@@ -656,6 +709,8 @@ class SentenceSpeaker:
                     self.error = error
                     log("TTS", f"streamed playback failed: {error}")
                 finally:
+                    if playback_temporary:
+                        playback_temporary.cleanup()
                     if temporary:
                         temporary.cleanup()
             finally:
