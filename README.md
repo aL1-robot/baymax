@@ -37,6 +37,46 @@ Install the system audio player used for music:
 sudo apt install mpv
 ```
 
+## Run with Docker
+
+Docker is supported on Linux hosts (including ARM64 Orange Pi boards). The
+container installs the Python dependencies, ALSA tools, and `mpv`. It uses the
+host's sound devices and host networking, so it can reach the local LLM and
+search services using their existing `localhost` URLs.
+
+First, put the Faster Whisper model in `~/models/faster-whisper-base.en` and
+make sure the wake-word and voice models included in this repository are
+present. Then configure optional API keys and your timezone:
+
+```bash
+mkdir -p ~/models
+cp .env.example .env
+# Edit .env: set TAVILY_API_KEY if desired and set TZ, for example TZ=Asia/Taipei
+```
+
+Build and start Baymax:
+
+```bash
+docker compose up --build
+```
+
+The Compose service mounts `~/models` read-only at `/root/models`, persists
+generated speech in `./voice_cache`, and passes `/dev/snd` through for ALSA.
+The default microphone device remains `plughw:3,0`; if your host uses another
+device, update the Compose command, for example:
+
+```yaml
+command: ["python", "assistant.py", "--alsa", "default"]
+```
+
+For the SPI LED controller, enable the commented `/dev/spidev4.1` device
+mapping in `docker-compose.yml` (adjust the device path if your board differs).
+The container does not request privileged mode. Audio and SPI access require
+the host devices to exist and be accessible to Docker.
+
+Stop the service with Ctrl+C or `docker compose down`. To run in push-to-talk
+mode instead, add `"--ptt"` to the command array in `docker-compose.yml`.
+
 ## Download Piper
 
 Download the latest ARM64 release and extract it somewhere convenient, such as the repo root or a local bin directory:

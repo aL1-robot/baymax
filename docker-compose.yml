@@ -1,0 +1,24 @@
+services:
+  baymax:
+    build:
+      context: .
+    image: baymax-assistant
+    container_name: baymax-assistant
+    restart: unless-stopped
+    init: true
+    command: ["python", "assistant.py"]
+    network_mode: host
+    stdin_open: true
+    tty: true
+    environment:
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      TZ: ${TZ:-Etc/UTC}
+    volumes:
+      - ${HOME}/models:/root/models:ro
+      - ./voice_cache:/app/voice_cache
+      - /dev/snd:/dev/snd
+    device_cgroup_rules:
+      - "c 116:* rmw"
+    # Enable this mapping on boards with the configured SPI LED controller:
+    # devices:
+    #   - /dev/spidev4.1:/dev/spidev4.1
