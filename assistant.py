@@ -1503,6 +1503,22 @@ def play_started_reply(results):
     return None
 
 
+_DEFAULT_MUSIC_GENRES = (
+    "jazz", "classic rock", "reggae", "hip-hop", "classical", "soul",
+    "country", "electronic", "folk", "funk", "blues", "indie rock",
+    "Latin", "ambient", "metal", "pop",
+)
+_music_genre_cycle = []
+
+
+def _next_default_music_genre():
+    if not _music_genre_cycle:
+        _music_genre_cycle.extend(
+            random.sample(_DEFAULT_MUSIC_GENRES, len(_DEFAULT_MUSIC_GENRES))
+        )
+    return _music_genre_cycle.pop()
+
+
 def _music_candidate_score(query, candidate):
     def normalize(value):
         value = unicodedata.normalize("NFKD", value)
@@ -1525,10 +1541,17 @@ def _music_candidate_score(query, candidate):
 def ask_music_llm(history, user_text, args):
     """Resolve the requested song, then choose its closest catalogue result."""
     context = list(history[-10:])
+    suggested_genre = _next_default_music_genre()
     search_messages = [
         {
             "role": "system",
-            "content": PERSONA + "\n\n" + skills.group_prompt("MUSIC"),
+            "content": (
+                PERSONA + "\n\n" + skills.group_prompt("MUSIC")
+                + f"\nFor an unspecified music request, search for "
+                f"{suggested_genre} music. Use that suggestion only when "
+                "neither the current request nor recent conversation gives "
+                "a song, artist, or genre preference."
+            ),
         },
         *context,
         {"role": "user", "content": user_text + " /no_think"},

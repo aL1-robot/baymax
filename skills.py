@@ -481,8 +481,9 @@ def group_prompt(group):
             1,
             "Use the request and recent conversation to decide what music "
             "action is intended. When playback is requested without a song, "
-            "artist, or genre preference, choose a genre such as pop and search "
-            "for that genre of music; playback uses the first search result. "
+            "artist, or genre preference, use the varied genre suggestion in "
+            "the system instructions; playback "
+            "uses the first search result. "
             "Put actual search terms in the MUSIC_PLAY tag, formatted as "
             "[[MUSIC_PLAY:<search terms>]]. Never use placeholder words like "
             "\"QUERY\" or \"search terms\" as the search terms, and do not use "
