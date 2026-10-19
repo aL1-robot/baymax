@@ -55,7 +55,7 @@ import time
 # --------------------------------------------------------------- LED strip
 class LedStrip:
     BUS, DEV = 4, 1
-    NUM_LEDS = 30
+    NUM_LEDS = 100
     WARM_WHITE = (255, 147, 41)
 
     MAX_BRIGHTNESS = 0.8      # HARD CAP: this is what 100% means (strip runs hot above it)
