@@ -242,7 +242,7 @@ def play_youtube_music_result(candidate):
         player,
         "--no-video",
         "--no-terminal",
-        "--msg-level=all=no,ao=warn",
+        "--msg-level=all=warn",
     ]
     output_device = os.environ.get("ALSA_OUTPUT_DEVICE")
     if output_device:
@@ -257,6 +257,7 @@ def play_youtube_music_result(candidate):
     import select
     
     fd = sys.stdin.fileno()
+    skipped = False
     if sys.stdin.isatty():
         import tty
         import termios
@@ -271,6 +272,7 @@ def play_youtube_music_result(candidate):
                         break
                     if ch.lower() == 'c':
                         print("  [Skipped song]", flush=True)
+                        skipped = True
                         proc.terminate()
                         break
         except Exception:
@@ -279,7 +281,7 @@ def play_youtube_music_result(candidate):
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     
     proc.wait()
-    if proc.returncode:
+    if proc.returncode and not skipped:
         raise RuntimeError(f"mpv exited with status {proc.returncode}")
     return title
 

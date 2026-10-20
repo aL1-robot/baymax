@@ -244,7 +244,8 @@ track's audio stream URL, so `mpv` does not need its own YouTube download
 helper. Playback runs to
 completion before Baymax listens for another request. Baymax cannot hear a
 voice command to stop the track while it is playing. Playback errors are
-reported after the player exits. This uses free, unofficial YouTube search and
+reported after the player exits; `mpv` warnings and errors are included in the
+container logs. This uses free, unofficial YouTube search and
 playback, requires an internet connection, and may be affected by YouTube or
 yt-dlp changes.
 The LLM interprets music requests using the recent conversation and creates a
