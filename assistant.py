@@ -1051,6 +1051,70 @@ def record_utterance(mic, thr, max_wait=6.0, max_len=15.0, end_silence=1.0):
     return pcm
 
 
+def enhance_audio_for_stt(pcm_bytes, vad_threshold):
+    """Denoise a VAD-segmented clip and normalize its speech level for Whisper."""
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    if not samples.size:
+        return pcm_bytes
+
+    cmd = [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "pipe:0",
+        "-af", "afftdn=nr=12:nf=-50:tn=1",
+        "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "pipe:1",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, input=pcm_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True, timeout=30,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg is required for STT noise suppression; install ffmpeg") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode(errors="replace").strip()
+        raise RuntimeError(f"ffmpeg noise suppression failed: {detail}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ffmpeg noise suppression timed out") from exc
+
+    denoised = np.frombuffer(result.stdout, dtype=np.int16)
+    if denoised.size != samples.size:
+        raise RuntimeError(
+            f"ffmpeg changed audio length ({samples.size} to {denoised.size} samples)"
+        )
+
+    frame_samples = SAMPLE_RATE // 100
+    frame_count = denoised.size // frame_samples
+    if frame_count == 0:
+        return result.stdout
+    frame_count = min(frame_count, samples.size // frame_samples)
+    source_frames = samples[:frame_count * frame_samples].reshape(frame_count, frame_samples)
+    denoised_frames = denoised[:frame_count * frame_samples].reshape(frame_count, frame_samples)
+    frame_levels = np.sqrt(np.mean(source_frames.astype(np.float32) ** 2, axis=1))
+    speech_frames = frame_levels >= vad_threshold * 0.5
+    if not np.any(speech_frames):
+        speech_frames = frame_levels > 0
+    if not np.any(speech_frames):
+        return result.stdout
+
+    speech = denoised_frames[speech_frames].astype(np.float32)
+    speech_rms = float(np.sqrt(np.mean(speech ** 2)))
+    if speech_rms <= 0:
+        return result.stdout
+
+    target_rms = 0.12 * 32768
+    gain = min(target_rms / speech_rms, 12.0)
+    normalized = denoised.astype(np.float32) * gain
+    peak_level = float(np.max(np.abs(normalized)))
+    if peak_level > 0.98 * 32767:
+        normalized *= (0.98 * 32767) / peak_level
+    output = np.clip(np.rint(normalized), -32768, 32767).astype(np.int16)
+
+    vlog("STT", f"noise suppressed; speech RMS {speech_rms:.0f} -> "
+                f"{min(speech_rms * gain, 0.98 * 32767):.0f} "
+                f"(gain {20 * math.log10(gain):+.1f} dB)")
+    return output.tobytes()
+
+
 # ---------------------------------------------------------------------- STT
 def transcribe(model, pcm_bytes):
     """Returns (text, confidence). confidence = {"logprob", "no_speech"}."""
@@ -1060,9 +1124,12 @@ def transcribe(model, pcm_bytes):
     segments, info = model.transcribe(
         audio, language="en", beam_size=5,
         condition_on_previous_text=False,
-        # record_utterance already detects speech boundaries; Whisper's VAD can
-        # otherwise trim a quiet or softly spoken first word.
-        vad_filter=False,
+        vad_filter=True,
+        vad_parameters={
+            "threshold": 0.35,
+            "min_speech_duration_ms": 120,
+            "speech_pad_ms": 300,
+        },
     )
     vlog("STT", f"language={info.language} (p={info.language_probability:.2f})")
     parts, lps, nsp = [], [], []
@@ -1843,6 +1910,7 @@ def converse(args, mic, thr, stt, history, turn):
         pcm = record_utterance(mic, thr, max_wait=wait)
         if pcm is None:
             return "no speech"
+        pcm = enhance_audio_for_stt(pcm, thr)
         if args.save_wavs:
             log("REC", f"saved to {save_wav(pcm, turn)}")
         text, conf = transcribe(stt, pcm)

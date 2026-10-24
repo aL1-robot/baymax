@@ -10,6 +10,7 @@ RUN apt-get update \
         alsa-utils \
         build-essential \
         ca-certificates \
+        ffmpeg \
         libasound2 \
         libasound2-plugins \
         libespeak-ng1 \

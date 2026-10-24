@@ -18,6 +18,7 @@ A local voice assistant for ARM devices like the Orange Pi 5. It combines a wake
 - `venv` support
 - `arecord` / ALSA for microphone input
 - `aplay` / ALSA for assistant voice playback
+- `ffmpeg` for microphone noise suppression
 - `mpv` for music playback (`sudo apt install mpv` on Ubuntu/Debian)
 - A compatible ARM64 or x86_64 Linux environment
 
@@ -31,11 +32,17 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Install the system audio player used for music:
+Install the system audio tools used for music playback and microphone noise
+suppression:
 
 ```bash
-sudo apt install mpv
+sudo apt install ffmpeg mpv
 ```
+
+Before speech recognition, Baymax noise-reduces each VAD-segmented recording
+with FFmpeg's speech denoiser, then normalizes gain using only speech-active
+frames. Faster Whisper's Silero VAD makes a second pass on the enhanced audio.
+This helps quiet speech without boosting the captured silence as aggressively.
 
 ## Run with Docker
 
